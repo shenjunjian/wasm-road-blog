@@ -66,6 +66,23 @@ Node.js       → 原生扩展的跨平台替代、napi-rs Wasm 回退
 非 Web 运行时  → Wasmtime、Wasmer、WAMR（配合 WASI）
 ```
 
+### Wasm 跨语言复用与包生态
+
+Wasm 的核心价值之一，是把 **「一次编译，多处运行」** 从「同一语言内跨平台」扩展到 **跨语言边界**：Rust、C/C++、Go、AssemblyScript 等各自编译出 `.wasm`，宿主（浏览器 JS、Node、Python、Wasmer CLI 等）只需按统一的 `import` / `export` 约定加载，就能调用其中的函数——**调用方不必与编写方使用同一种语言**。例如用 Rust 写的图像压缩库编译为 `.wasm` 后，前端 JS 直接 `WebAssembly.instantiate` 调用；在 Node 里也可通过 `napi-wasm` 或 WASI 运行时复用同一份二进制。
+
+随着 **Component Model + WIT** 的发展，跨语言复用更进一步：接口以 `.wit` 描述，各语言通过 `wit-bindgen` 生成绑定，组件之间像拼乐高一样组合——这才是 Wasm 生态长期对标 npm 的方向。
+
+目前已有的共享渠道（成熟度不一）：
+
+| 平台 | 地址 | 定位 |
+|------|------|------|
+| **Wasmer Registry** | [wasmer.io](https://wasmer.io/) | 最接近「Wasm 版 npm」——`wasmer publish` 发布、`wasmer run` 安装运行；原 WAPM 已并入此处 |
+| **npm** | [npmjs.com](https://www.npmjs.com/) | 前端主流路径：`wasm-pack` 将 Rust Wasm 与 JS 胶水一并发布（如 `wasm-bindgen` 系包），搜索关键词 `wasm` 可找到大量模块 |
+| **OCI / wkg** | [wasm-pkg-tools](https://github.com/bytecodealliance/wasm-pkg-tools) | Bytecode Alliance 推动的 Component 分发方案，通过 `wkg` CLI 从 OCI 镜像仓库拉取/发布 Wasm 组件 |
+| **Warg 注册表** | [warg.wa.dev](https://warg.wa.dev/) | 实验性的联邦式 Wasm 包索引，面向 Component Model，生态仍在建设中 |
+
+一句话总结：**跨语言复用靠 `.wasm` 二进制 + 统一接口；找现成模块，生产环境优先看 Wasmer Registry 和 npm，Component 时代则关注 OCI + `wkg` 工具链。**
+
 ### 本文知识地图
 
 ```mermaid
@@ -120,16 +137,97 @@ Wasm 二进制 (.wasm) 或文本格式 (.wat)
 - 理解为什么某些代码编译后体积大
 - 排查 import/export 签名不匹配的问题
 
+#### WAT 与 Wasm 原文对照（加法示例）
+
+Wasm 有两种等价表示：**文本格式 WAT**（WebAssembly Text Format，人类可读）和 **二进制格式 `.wasm`**（网络传输与引擎加载用）。下面是一个最小的 `add(a, b) = a + b` 模块——逻辑完全相同，只是载体不同。
+
+**WAT 文本**（保存为 `add.wat`）：
+
+```wat
+(module
+  ;; 导出函数 add(i32, i32) -> i32
+  (func (export "add") (param i32 i32) (result i32)
+    local.get 0    ;; 取第 1 个参数压栈
+    local.get 1    ;; 取第 2 个参数压栈
+    i32.add        ;; 弹出两个 i32 相加，结果压栈
+  )
+)
+```
+
+**`.wasm` 二进制原文**（用十六进制查看时的实际字节，共 40 字节）：
+
+```
+00 61 73 6d   ;; Magic: "\0asm"
+01 00 00 00   ;; Version: 1
+
+01 07 01 60 02 7f 7f 01 7f   ;; type 段：1 个函数类型 (i32,i32) -> i32
+03 02 01 00                  ;; function 段：1 个函数，签名索引 0
+07 07 01 03 61 64 64 00 00   ;; export 段：导出函数名 "add"（0x61 0x64 0x64）
+0a 09 01 07 00 20 00 20 01 6a 0b
+;; code 段：函数体 = local.get 0 + local.get 1 + i32.add + end
+```
+
+用文本编辑器打开 `.wasm` 会看到乱码——这是正常的，它本来就是紧凑的二进制指令流，不是给人直接阅读的。想理解二进制里写了什么，要么反汇编回 WAT，要么借助下面提到的工具。
+
+> 更完整的 WAT 手写示例（含内存、import）见 [附录 A](#附录-a用-wat-手写一个最小模块)。
+
+#### WAT ↔ Wasm 互转：工具与命令
+
+官方生态里最常用的是 **[WABT](https://github.com/WebAssembly/wabt)**（WebAssembly Binary Toolkit）：
+
+| 方向 | 命令 | 说明 |
+|------|------|------|
+| WAT → Wasm | `wat2wasm add.wat -o add.wasm` | 文本编译为二进制 |
+| Wasm → WAT | `wasm2wat add.wasm -o add.wat` | 反汇编为可读文本 |
+| 查看结构 | `wasm-objdump -x add.wasm` | 列出段、类型、导出等 |
+| 解释执行 | `wasm-interp add.wasm -r add -a "i32:3" -a "i32:5"` | 命令行直接调用导出函数，输出 `i32:8` |
+
+安装方式（任选其一）：
+
+```bash
+# macOS
+brew install wabt
+
+# Windows（Scoop）
+scoop install wabt
+
+# npm
+npm install -g wabt
+
+# 源码编译
+git clone https://github.com/WebAssembly/wabt
+cd wabt && mkdir build && cd build && cmake .. && cmake --build .
+```
+
+除 WABT 外，**Binaryen** 工具集里的 `wasm-as` / `wasm-dis` 也能完成同类转换；`llvm-objdump -d module.wasm` 则适合分析 C/C++/Rust 经 LLVM 编译出的产物。日常「一段 WAT 和一份 `.wasm` 互相对照」用 WABT 就足够。
+
+#### 用 Chrome 调试 Wasm
+
+从 Chrome 73 起，DevTools 已支持 WebAssembly 调试；近年版本能力更完整，主要包括：
+
+1. **无调试信息时**：在 DevTools → **Sources** 面板中仍能看到 Wasm 模块，引擎会把二进制**反汇编**为类 WAT 的文本，可单步执行、查看操作数栈变化（需配合 Scope / 调试侧边栏）。
+2. **有 DWARF 调试信息时**（C/C++/Rust 用 `-g` 编译，并生成 `.dwarf.wasm` 或内嵌 DWARF）：DevTools 能直接映射回**原始源代码**，支持断点、变量查看、调用栈——体验接近调试普通 JS。
+
+典型工作流：
+
+```
+1. 用 WAT/WABT 或编译器生成 .wasm
+2. 页面通过 WebAssembly.instantiate(Streaming) 加载
+3. 打开 DevTools → Sources → 左侧找到 .wasm 或对应的 .c/.rs 源文件
+4. 点击行号设断点，触发调用后单步调试
+```
+
+截至 2026 年，[Chrome 官方文档](https://developer.chrome.com/docs/devtools/wasm)仍要求安装扩展 [C/C++ DevTools Support (DWARF)](https://goo.gle/wasm-debugging-extension)——DWARF 解析尚未完全内置进 DevTools，扩展负责把 Wasm 里的调试信息关联到原始源文件。安装后需重启 Chrome；
+
+构建侧：Rust 用 `wasm-pack build --dev` 并在 `Cargo.toml` 中设置 `dwarf-debug-info = true`（默认 release 会剥离 DWARF）；Emscripten / Clang 用 `-g` 生成 DWARF。若只看到反汇编而没有源码，先检查 `.wasm` 里是否含 `.debug_*` 段（`wasm-objdump -x`），再确认扩展已启用。
+
+在 Sources 面板中还可对线性内存使用 **Memory Inspector**（右键 `WebAssembly.Memory` 对象 → Inspect memory），以十六进制查看 Wasm 线性内存的读写内容。
+
 ### 1.2 栈式虚拟机（Stack Machine）
 
 #### 什么是操作数栈
 
 Wasm 是 **栈式虚拟机（Stack Machine）**。函数执行时维护一个 **操作数栈（Operand Stack）**，大多数指令从栈顶取操作数，将结果压回栈顶。
-
-```
-指令序列:  i32.const 7  →  i32.const 8  →  i32.add
-操作数栈:  []           →  [7]          →  [7, 8]      →  [15]
-```
 
 每条 Wasm 指令由两部分组成：
 
@@ -152,17 +250,6 @@ Wasm 是 **栈式虚拟机（Stack Machine）**。函数执行时维护一个 **
 
 Wasm **禁止任意 `goto`**。所有跳转必须指向结构化块内的标签，这使得引擎可以在编译前 **静态验证** 控制流的合法性——不会出现"跳进了栈已销毁的栈帧"这类运行时错误。
 
-#### 与寄存器机的对比
-
-| 维度 | 栈式机（Wasm） | 寄存器机（x86/ARM） |
-|------|---------------|-------------------|
-| 指令格式 | 紧凑，无寄存器编号 | 需编码源/目标寄存器 |
-| 验证 | 可静态检查栈平衡 | 依赖硬件 |
-| 性能 | 引擎需做栈→寄存器分配优化 | 硬件直接操作寄存器 |
-| 适合场景 | 网络传输的中间格式 | 本地原生执行 |
-
-Wasm 引擎在运行时会将栈操作 **提升（lift）** 为寄存器操作，因此实际执行速度仍然很快。
-
 ### 1.3 模块、实例与内存
 
 Wasm 程序以 **模块（Module）** 为编译单元。模块本身不可执行，必须经过 **实例化（Instantiate）** 才能运行。
@@ -183,7 +270,7 @@ Instance（可执行的运行时实体）
 - 最小 1 页 = 64 KiB
 - 可通过 `memory.grow` 动态增长
 - 读写通过 `i32.load` / `i32.store` 等指令，带边界检查
-- 不是 GC 堆——没有 `malloc`/`free` 的内建实现，需语言运行时自行管理
+- 不是 GC 堆，它没有 `malloc`/`free` 的内建实现，需语言运行时自行管理
 
 ### 1.4 验证（Validation）
 
@@ -196,6 +283,19 @@ Instance（可执行的运行时实体）
 5. `call` / `call_indirect` 的目标函数签名匹配
 
 验证失败则实例化直接报错，**不会**运行到一半才崩溃。这是 Wasm 安全模型的重要一环。
+
+```javascript
+// js 环境下校验
+const wasmBytes = new Uint8Array([...])
+WebAssembly.validate(wasmBytes) // 只校验，不生成机器码
+
+WebAssembly.compile(bufferSource) // 隐式校验，再生成机器码
+```
+
+```bash
+# wabt 校验
+wasm-validate your_module.wasm
+```
 
 ### 1.5 二进制文件头
 
@@ -316,7 +416,9 @@ payload      (variable)  — 段内容
 
 #### code 段（ID 10）
 
-函数体。每个函数体包含：
+‌静态指令代码，模块加载后常驻内存，直到模块卸载。
+
+每个函数体包含：
 
 - 局部变量声明（在参数之外的局部变量）
 - 指令序列（以 `end` 结尾）
@@ -325,7 +427,7 @@ payload      (variable)  — 段内容
 
 #### data 段（ID 11）
 
-初始化线性内存的内容——将字符串、全局数据等写入内存的指定偏移。
+‌不可变‌。模块实例化时，其内容被复制到 Linear Memory ——将字符串、全局数据等写入内存的指定偏移。
 
 #### custom 段（ID 0）
 
@@ -333,7 +435,7 @@ payload      (variable)  — 段内容
 
 - `name` 段：函数/局部变量的调试名称
 - `producers` 段：工具链版本信息
-- 源码映射（source map）相关数据
+- 源码映射（source map）相关数据，比如DWARF 调试信息
 
 ### 2.4 段的排列规则
 
@@ -350,7 +452,7 @@ payload      (variable)  — 段内容
 ```
 
 - **custom 段**可出现在任意位置，可有多个
-- 其余标准段 **至多出现一次**，且必须按 ID 升序
+- 其余标准段 **至多出现一次**，且必须按 ID 升序, 目的是支持‌流式解析（Streaming Parsing）‌和‌单次遍历验证‌
 - 所有段都可以为空（空模块也是合法模块）
 
 ### 2.5 扩展段
@@ -359,7 +461,7 @@ Wasm 2.0+ 引入了 **datacount 段（ID 12）**，在 data 段之前声明数�
 
 ### 本章小结
 
-段是 Wasm 模块的骨架：type/import/export 定义接口，code/data 定义实现，memory/table/global 定义运行时资源。import 段是 Wasm 请求宿主能力的桥梁——没有它，Wasm 只是一个纯粹的计算孤岛。
+段是 Wasm 模块的骨架：**type/import/export**定义接口，**code/data** 定义实现，**memory/table/global** 定义运行时资源。**import** 段是 Wasm 请求宿主能力的桥梁——没有它，Wasm 只是一个纯粹的计算孤岛。
 
 ---
 
@@ -390,7 +492,7 @@ Wasm 1.0 MVP 共 **172 条指令**，opcode 为单字节。按功能分为 5 大
 | `drop` | 弹出栈顶值并丢弃 |
 | `select` | 根据条件选择两个值之一 |
 
-#### 变量指令（5 条 × 2 类 = 含局部和全局）
+#### 变量指令（5 条 ）
 
 | 指令 | 作用 |
 |------|------|
@@ -431,6 +533,35 @@ MVP 之后，指令总数超过 256，引入了 **前缀字节** 编码：
 
 因此 **172 是 MVP 基线**；Chrome、Firefox、Node.js 等现代引擎实际支持数百条指令。
 
+MVP（Chrome 57，2017 年 3 月）之后，Chrome 通过 V8 陆续默认启用了大量扩展提案。下表按 **Chrome 版本** 升序列出主要已落地特性（数据来源：[webassembly.org/roadmap](https://webassembly.org/features/)，截至 2026 年初）：
+
+| 提案名 | 提案描述 | Chrome 支持版本 |
+|--------|----------|----------------|
+| Mutable Globals | 允许在模块间导入/导出**可变**全局变量 | 74 |
+| Sign-extension Operators | 有符号扩展指令，如 `i32.extend8_s`、`i64.extend32_s` | 74 |
+| Threads | 共享线性内存 + 原子操作，支持 `SharedArrayBuffer` 多线程 Wasm（需站点开启 [跨域隔离](https://web.dev/articles/cross-origin-isolation-guide)） | 74 |
+| Bulk Memory Operations | 批量内存/表操作：`memory.copy`、`memory.fill`、`memory.init`、`table.copy` 等；支持 passive 数据段 | 75 |
+| Non-trapping float-to-int | 饱和浮点转整型（`i32.trunc_sat_f32_s` 等），越界时饱和而不 trap | 75 |
+| Multi-value | 函数与块支持**多个返回值**，如 `(result i32 i32)` | 85 |
+| JS BigInt Integration | JS `BigInt` 与 Wasm `i64` 在 JS API 层互操作（非字节码指令） | 85 |
+| Fixed-width SIMD | 128 位固定宽度向量指令，前缀 `0xfd`，如 `v128.load`、`i32x4.add` | 91 |
+| Legacy Exception Handling | 旧版异常处理方案（`try/catch` 块），已被 exnref 版取代 | 95 |
+| Reference Types | 引入 `funcref`、`externref` 引用类型，表元素不再限于 `anyfunc` | 96 |
+| Web Content Security Policy | Wasm 模块遵守宿主页面的 CSP 策略 | 97 |
+| Tail Call | 尾调用优化：`return_call`、`return_call_indirect` | 112 |
+| Extended Constant Expressions | 全局变量、元素段、数据段初始化可使用更丰富的常量表达式 | 114 |
+| Relaxed SIMD | 放宽部分 SIMD 指令的语义约束以换取更高性能（如 `i32x4.relaxed_dot_i8x16_i7x16`） | 114 |
+| Garbage Collection (WasmGC) | 结构体/数组堆类型，托管语言编译产物可直接复用 V8 垃圾回收器 | 119 |
+| Typed Function References | 强类型函数引用，`call_ref` 等指令，表项携带精确函数签名 | 119 |
+| Multiple Memories | 单个模块可声明并直接访问**多个**线性内存 | 120 |
+| JS String Builtins | Wasm 通过 import 直接调用宿主 JS 字符串内置方法（如 `fromCharCode`） | 130 |
+| Memory64 | 内存与表索引升级为 `i64`，寻址空间突破 4 GiB 上限 | 133 |
+| Branch Hinting | 为分支指令附加预测提示，帮助引擎优化热路径布局 | 137 |
+| Exception Handling (exnref) | 基于 `exnref` 的最终版异常处理，取代旧版 `try/catch` 方案 | 137 |
+| JS Promise Integration | Wasm 函数可挂起并等待 JS `Promise` 完成，简化异步互操作 | 137 |
+
+> 另有部分提案在 Chrome 中仅通过实验 flag 提供（如 Type Reflection、Stack Switching、Compilation Hints），尚未默认开启，上表未收录。
+
 ### 3.3 值类型
 
 #### MVP 四种基本类型
@@ -459,6 +590,25 @@ MVP 之后，指令总数超过 256，引入了 **前缀字节** 编码：
 
 MVP 限制最多 1 个返回值。**Multi-value** 扩展后支持多返回值，如 `(result i32 i32)`。
 
+>  为什么 MVP 不支持原生 string 类型？  
+   字符串涉及编码（UTF-8/16/32）、内存管理（GC 或手动 malloc/free）、子串切片等复杂逻辑，MVP 旨在提供一个最小的、可移植的编译目标，将这些复杂性留给上层语言（C/Rust/Go）的工具链处理。  
+   字符串在 Wasm MVP 中是通过‌“内存指针 + 长度”‌的模式，存储在‌线性内存（Linear Memory）‌中, 比如代码中硬编码的字符串（如 "Hello World"），编译器会将其放入 Wasm 模块的 ‌Data 段， 在模块实例化时，这些数据会被自动复制到 Linear Memory 的指定偏移位置。运行时生成的字符串，调用内存分配函数（如 C 的 malloc 或 Rust 的 alloc），在 Linear Memory 中申请一块足够大的空间，使用 i32.store8 等指令，将字符串的 UTF-8 字节逐个写入申请的内存区域，返回起始地址（i32）和长度（i32）即可。
+
+```javascript
+// 如何从wasm实例中，读取字符串到 JS
+const memory = wasmInstance.exports.memory;
+const ptr = wasmInstance.exports.get_string_ptr(); // 返回 i32
+const len = wasmInstance.exports.get_string_len(); // 返回 i32
+
+// 从 Wasm 内存中读取字节
+const bytes = new Uint8Array(memory.buffer, ptr, len);
+// 解码为 JS 字符串 (默认 UTF-8)
+const jsString = new TextDecoder('utf-8').decode(bytes);
+console.log(jsString);
+```
+   有关string的提案有很多，大都夭折了，目前可以关注 3.2 节的`JS String Builtins（chrome 130+)`,通过 import 调用宿主 JS 字符串 API。 另外实际开发时，不需要关注这个，大多数开发语言会处理字符串的问题，`wasm-bindgen` 参见 6.7 节。
+
+
 ### 3.4 内存模型深入
 
 ```
@@ -486,11 +636,11 @@ MVP 限制最多 1 个返回值。**Multi-value** 扩展后支持多返回值，
 
 | 限制 | 原因 | 解决方案 |
 |------|------|---------|
-| **无自动内存管理** | 只有线性内存，无 GC | 语言运行时自带分配器（Rust `dlmalloc`/`wee_alloc`） |
+| **无自动内存管理** | 只有线性内存，无 GC | 语言运行时自带分配器（Rust `dlmalloc`/`wee_alloc`）,GC扩展提案主要服务 Java/Kotlin/JS 等托管语言编译器 |
 | **无 DOM 访问** | 沙箱隔离 | `wasm-bindgen` + `web-sys` 从 JS 导入 |
 | **无文件系统** | 无 syscall | WASI（`wasm32-wasi`）或 JS import |
 | **无网络** | 同上 | `web-sys::fetch` 或 WASI socket 扩展 |
-| **无线程（MVP）** | 单线程模型 | 线程扩展 + `SharedArrayBuffer` |
+| **无线程** | 单线程模型 | Threads扩展 + `SharedArrayBuffer` |
 | **无随机数** | 确定性要求 | 导入 `Math.random` 或 `getrandom` crate |
 | **无直接系统调用** | 安全沙箱 | 全部通过 import 请求宿主 |
 
