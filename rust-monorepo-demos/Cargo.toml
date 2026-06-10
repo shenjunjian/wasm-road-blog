@@ -1,0 +1,9 @@
+[workspace]
+# 指定哪些目录是 workspace 的成员
+# "crates/*" 表示 crates 目录下的所有子目录都是成员
+members = [
+    "crates/*",
+]
+
+# (可选) 解析器版本，建议设为 2021 或更高以支持更优的依赖解析
+resolver = "2"

@@ -698,23 +698,7 @@ console.log(jsString);
 
 参见 `load-wasm-in-page` 示例
 
-### 4.3 流式加载的原理
-
-```
-传统方式:
-  下载 100% ──→ 编译 ──→ 实例化 ──→ 执行
-  |←── 等待全部完成 ──→|
-
-流式方式:
-  下载 0% ──→ 编译开始 ──→ ...
-  下载 50% ──→ 编译进行中 ──→ ...
-  下载 100% ──→ 编译完成 ──→ 实例化 ──→ 执行
-  |←── 下载与编译并行 ──→|
-```
-
-`instantiateStreaming` 将 `fetch` 的 `Response` 直接传给引擎，引擎在数据到达时就开始编译。实测可将首屏等待缩短 30%–50%。
-
-### 4.4 服务器配置
+### 4.3 服务器配置
 
 #### Content-Type
 
@@ -750,7 +734,7 @@ gzip_types application/wasm;
 
 跨域加载需要服务器返回 `Access-Control-Allow-Origin`。同源部署则无此问题。
 
-### 4.5 import 对象详解
+### 4.4 import 对象详解
 
 `imports` 对象的键必须与 Wasm 模块 import 段 **完全匹配**：
 
@@ -773,19 +757,7 @@ const imports = {
 
 名称、模块名、类型任一不匹配，实例化都会抛出 `LinkError`。
 
-### 4.6 复用 Module，创建多个 Instance
-
-```javascript
-const module = await WebAssembly.compileStreaming(fetch('/game.wasm'));
-
-// 每个玩家一个独立实例，拥有独立内存
-const player1 = await WebAssembly.instantiate(module, makeImports());
-const player2 = await WebAssembly.instantiate(module, makeImports());
-```
-
-`Module` 编译一次，可实例化多次。这在游戏、多租户场景中很有用。
-
-### 4.7 与 wasm-bindgen 生成物的关系
+### 4.6 与 wasm-bindgen 生成物的关系
 
 `wasm-pack build` 生成的 `pkg/` 目录结构：
 
@@ -806,7 +778,7 @@ pkg/
 
 你不需要手动写 imports——wasm-bindgen 帮你生成好了。
 
-### 4.8 调试技巧
+### 4.7 调试技巧
 
 ```javascript
 // 查看模块导出了什么
