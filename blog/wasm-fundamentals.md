@@ -696,52 +696,7 @@ console.log(jsString);
 
 ### 4.2 完整 HTML 示例
 
-```html
-<!DOCTYPE html>
-<html lang="zh">
-<head>
-  <meta charset="UTF-8">
-  <title>Wasm 流式加载示例</title>
-</head>
-<body>
-  <h1>Wasm Demo</h1>
-  <p id="output"></p>
-
-  <script type="module">
-    async function loadWasm() {
-      const imports = {
-        env: {
-          // 如果 wasm 模块 import 了 "env"."abort"，需要提供此函数
-          abort: () => console.error('Wasm abort called'),
-        },
-      };
-
-      let result;
-
-      try {
-        // 优先使用流式加载
-        const { instance } = await WebAssembly.instantiateStreaming(
-          fetch('/add.wasm'),
-          imports
-        );
-        result = instance.exports.add(3, 4);
-      } catch (e) {
-        // Content-Type 不正确或浏览器不支持时回退
-        console.warn('instantiateStreaming 失败，回退到 arrayBuffer 方式:', e);
-        const response = await fetch('/add.wasm');
-        const bytes = await response.arrayBuffer();
-        const { instance } = await WebAssembly.instantiate(bytes, imports);
-        result = instance.exports.add(3, 4);
-      }
-
-      document.getElementById('output').textContent = `3 + 4 = ${result}`;
-    }
-
-    loadWasm();
-  </script>
-</body>
-</html>
-```
+参见 `load-wasm-in-page` 示例
 
 ### 4.3 流式加载的原理
 
