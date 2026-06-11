@@ -3,6 +3,9 @@
 //! 构建：
 //!   cargo build -p simple-wasm --target wasm32-unknown-unknown --release
 //!
+//! 构建（含 DWARF 调试信息）：
+//!   cargo build -p simple-wasm --target wasm32-unknown-unknown
+//!
 //! 产物：
 //!   target/wasm32-unknown-unknown/release/simple_wasm.wasm
 
