@@ -670,9 +670,235 @@ console.log(jsString);
 
 ---
 
-## 第 4 章：网页引入 wasm 与流式加载
+## 第 4 章：Rust wasm 与流式加载
 
-### 4.1 JavaScript API 全景
+### 4.1 完整rust 编译最简wasm工程
+
+参见 `simple-wasm` 示例, 下面记录一下重要知识点：
+
+1. 工程配置
+
+标准的 `lib` 工程， 需要安装编译目标 `wasm32-unknown-unknown`, 
+
+```bash
+# 1. 安装 Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# 2. 添加 wasm32 编译目标
+rustup target add wasm32-unknown-unknown
+```
+
+设置编译选项，后面详述。  
+
+```toml
+# simple-wasm\.cargo\config.toml
+
+[target.wasm32-unknown-unknown]
+rustflags = [
+    "-C", "link-arg=--export-memory",
+    "-C", "link-arg=--export-table",
+]
+```
+
+```bash
+ # 构建发布
+ cargo build -p simple-wasm --target wasm32-unknown-unknown --release
+
+ # 构建（含 DWARF 调试信息）：
+ cargo build -p simple-wasm --target wasm32-unknown-unknown
+```
+
+2. #![no_std] 与 #[panic_handler]
+ 
+ 正常情况下，每个 Rust 二进制或库项目都会隐式链接 std 标准库。
+
+增加#![no_std] 全局属性，用于声明当前 crate ‌不链接 Rust 标准库（std）‌，仅使用核心库（core）。`core 模式`是rust的最小子集，不依赖任何操作系统，只包括：`基础类型`， `基础 trait`, `内存操作`, `数学运算`， 不包含 `std` 提供的库： `堆分配 Box,Vec,String` `线程， IO, 网络`, `集合类 Map,Set` `操作系统相关`， 所以体积更小， 多用于`嵌入式， 操作系统内核， wasm模块`等场合。
+
+`core 模式`没有标准库的默认 panic 处理，所以必须提供 #[panic_handler]， 如果生产环境更常用 wasm-bindgen 或带 backtrace 的 panic hook。
+
+3. #[no_mangle]
+
+禁止 Rust 对符号名做 name mangling， 通常和 pub extern "C" 一起用，方便宿主按名字调用。
+
+4. 线性内存的读写
+
+  `simple-wasm\.cargo\config.toml` 的配置中，可以指定2种模式：
+
+ 1. 使用 `--export-memory` 后，模块内部创会建 memory， JS 通过 `instance.exports.memory` 拿到这个内存
+
+ 2. 使用 `--import-memory` 后，模块没有自己的 memory 段， JS 必须先 `new WebAssembly.Memory({ initial: 17 })` 放进 imports.env.memory， 然后 Rust 的栈、.rodata、.bss、堆（若有）、以及所有指针操作，全部在这块 imported memory 里。
+
+无论哪个模式，它都只是同一块线性内存，它们是互斥的。
+
+读写内存，直接按照索引去读取 i32, i64 这样就好了, 详见示例：
+
+```rust
+unsafe {
+        (offset as *mut i32).write_volatile(result); // i32.store offset=0 
+        (offset as *const i32).read_volatile();  // i32.load offset=0
+}
+```
+
+5. table 示例
+
+Wasm 规范里和「函数表」相关的其实是**两个段**，职责不同：
+
+| 段 | 作用 |
+|---|---|
+| **table 段（Section 4）** | 只声明「有一张 `funcref` 表，初始/最大长度是多少」——**不包含具体函数** |
+| **elem 段（Section 9）** | 把 `ref.func` 写进表的指定槽位——**这里才会出现 `table_add` / `table_sub` 的引用** |
+| **code 段** | 函数本体（`table_add`、`table_sub` 的指令在这里） |
+
+5.1  export-table 的用法
+Rust 里这种写法就是标准的table 用法：
+
+```rust
+static OPS: [fn(i32, i32) -> i32; 2] = [table_add, table_sub];
+OPS[index as usize](a, b)  // → 编译成 call_indirect
+```
+
+是 Rust/`wasm32-unknown-unknown` 里演示 **函数指针 + 间接调用** 的常见方式：编译器会生成 `__indirect_function_table`，并在 elem 段里填入函数引用。
+
+用 `wasm-objdump` 看当前 debug 产物，结构大致是：
+
+```text
+Table[1]:
+  table[0] type=funcref initial=4 max=4
+
+Elem[1]:
+  segment[0] table=0 offset=1 count=3
+    elem[1] = ref.func: table_add
+    elem[2] = ref.func: table_sub
+    elem[3] = ref.func: (Rust fmt 相关函数，编译器自动塞进去的)
+
+Export:
+  table[0] -> "__indirect_function_table"
+```
+
+**和 memory 一样：export 模式 vs import 模式，二选一。你当前 demo 走的是 export-table。**
+
+```toml
+#.cargo/config.toml
+"-C", "link-arg=--export-table",
+```
+
+含义是：
+
+- Wasm **自己创建**函数表
+- 实例化后从 **`instance.exports.__indirect_function_table`** 拿到
+- JS **不需要**事先 `new WebAssembly.Table(...)`
+
+只有对应链接参数 `--import-table`，import 段里传入table时，才需要在实例化前由宿主创建并传入：
+
+```wat
+(import "env" "table" (table ...))
+```
+
+5.2  import-table 的用法
+
+```javascript
+// 创建一张可存放函数引用的表（anyfunc = funcref）
+const table = new WebAssembly.Table({ initial: 3, element: 'anyfunc' });
+// 把 JS 函数放进表里（按索引）
+table.set(0, () => console.log('hello from table[0]'));
+table.set(1, (a, b) => a + b);
+const imports = {
+  env: {
+    table,  // 作为 import 传给 wasm
+  },
+};
+const { instance } = await WebAssembly.instantiateStreaming(
+  fetch('module.wasm'),
+  imports
+);
+// 调用 wasm 导出的函数，让它通过 table 间接调用 JS
+instance.exports.run_via_table(0);        // 打印 hello
+instance.exports.call_add(1, 10, 20);      // 返回 30
+```
+
+对应的 Wasm 文本（WAT）,通过 `call_indirect` 实现表调用 ，大致是这样：
+
+```wat
+(import "env" "table" (table 3 funcref))
+
+(type $void_fn (func))
+(type $add_fn (func (param i32 i32) (result i32)))
+
+;; 调用 table[0]，无参无返回值
+(func (export "run_via_table") (param $idx i32)
+  local.get $idx
+  call_indirect (type $void_fn)
+)
+
+;; 调用 table[1]，两个 i32 参数
+(func (export "call_add") (param $idx i32) (param $a i32) (param $b i32) (result i32)
+  local.get $a
+  local.get $b
+  local.get $idx
+  call_indirect (type $add_fn)
+)
+```
+
+5.3 Rust 侧：如何调用 Table 里的函数
+
+纯 Rust（`wasm32-unknown-unknown`）里没有像 `table.get(1)` 这样的高层 API；编译器在通过**函数指针 / trait 对象**做间接调用时，会生成 `call_indirect`。常见两种写法：
+
+  方式 A：手写 `extern "C"` + 函数指针（接近 WAT）
+
+```rust
+type AddFn = extern "C" fn(i32, i32) -> i32;
+
+#[no_mangle]
+pub unsafe extern "C" fn call_add(idx: u32, a: i32, b: i32) -> i32 {
+    // 实际项目里 idx 会配合模块自己的 table / 链接脚本使用；
+    // 这里表达的是「按索引间接调用」这一语义
+    let f: AddFn = core::mem::transmute(idx as usize);
+    f(a, b)
+}
+```
+
+更稳妥的做法是让 **table 成为模块的 import**，由链接配置（`.cargo/config.toml` 或 `wasm-bindgen`）把 `call_indirect` 绑到那张表上，而不是手写 `transmute`。
+
+  方式 B：`wasm-bindgen`（工程里更常见）
+
+`wasm-bindgen` 会把闭包、回调放进 **function table**，JS 更新 table 后，Rust 侧通过生成的 trampoline 间接调用——这正是 Table 的典型用途。
+
+```rust
+use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = ["table"], js_name = get)]
+    fn table_get(idx: u32) -> js_sys::Function;
+}
+```
+
+日常更常见的是：`#[wasm_bindgen]` 把 Rust 回调注册进 table，或 `Closure::wrap` 让 JS 持有并在之后调用。
+
+5.4 Table的优势：
+
+**直接 import 函数**（如 `imports.env.add`）是**静态绑定**：实例化时名字就固定了，Wasm 用 `call` 直接调，不能在运行时换实现。  
+**import table** 是**动态间接调用**：Wasm 用 `call_indirect` 按索引查表再调，表内容由 JS（或 Wasm 自己）在运行时 `table.set(i, fn)` 更新，适合回调、虚函数、插件式替换。
+
+---
+
+支持动态更新函数引用是 Table 的核心价值之一：
+
+```javascript
+table.set(1, (a, b) => a + b);      // 第一次：普通加法
+instance.exports.call_add(1, 10, 20); // → 30
+
+table.set(1, (a, b) => a * b);      // 运行时替换
+instance.exports.call_add(1, 10, 20); // → 200（同一条 call_indirect，新实现）
+```
+
+注意：
+
+- 新函数的**类型**（参数/返回值）必须和 Wasm 里 `call_indirect` 用的 type 一致，否则行为未定义。
+- `element: 'anyfunc'` 在较新的规范里更常写成 `'funcref'`，语义相同。
+- 若 table 是 **import** 进来的，一般由 **JS 宿主** `set`；若 table 在 Wasm 模块内且 export 给 JS，两边都可以更新（取决于你怎么设计）。
+
+### 4.2 完整 HTML 示例
 
 浏览器通过 `WebAssembly` 全局对象与 Wasm 交互。核心类型：
 
@@ -694,9 +920,137 @@ console.log(jsString);
 | 异步实例化 | `WebAssembly.instantiate(bytes, imports)` | 编译 + 实例化 |
 | 流式实例化 | `WebAssembly.instantiateStreaming(response, imports)` | **推荐** |
 
-### 4.2 完整 HTML 示例
+参见 `load-wasm-in-page` 示例, 下面记录一下重要知识点：
 
-参见 `load-wasm-in-page` 示例
+1. 初始化线性内存
+`new WebAssembly.Memory({ initial: 17 })`   17 页 = 17 *  65,536 (64kb)  个字节 =约 1.06 Mb。
+
+含义大致是：
+
+栈指针从 1 MiB（第 16 页末尾）开始向下增长
+.rodata 静态数据放在 1048576 起，用到 1049597
+最高地址 ÷ 页大小：ceil(1049597 / 65536) = 17 → 至少需要 17 页
+所以 17 = 链接器算出的 最小页数，要覆盖栈 + 静态数据 + 预留空间。
+
+若使用 --import-memory，JS 侧 initial 必须 ≥ Wasm 模块 import 段声明的最小页数，否则实例化会报 LinkError。
+
+2. vite 工程加载 wasm的几种方式 
+
+在 Vite 里，`fetch('/add.wasm')` 这种写法**不会自动找到** `src/` 下的 wasm 文件。你当前工程里实际文件是 `src/simple_wasm.wasm`，而 `/add.wasm` 只会去 `public/add.wasm` 找——`public/` 里并没有这个文件，所以会 404。
+
+Vite 里加载 wasm 主要有三种方式，按场景选择：
+
+---
+
+#### 方式一：`public/` + 绝对路径（最简单，但不参与打包）
+
+把 wasm 放到 `public/` 目录，开发时 Vite 会原样挂在站点根路径：
+
+```
+public/simple_wasm.wasm
+```
+
+```ts
+fetch('/simple_wasm.wasm')
+```
+
+- 开发、生产都能用
+- 不参与 hash、不参与依赖分析与打包
+- 适合演示或固定路径的静态资源
+
+---
+
+#### 方式二：`?url` 导入 或 `assetsInclude`配置
+
+##### 2.1  `?url` 导入
+
+wasm 放在 `src/` 里，用 Vite 的 `?url` 拿到**构建后的真实 URL**：
+
+```ts
+import wasmUrl from './simple_wasm.wasm?url'
+
+async function loadWasm() {
+  const imports = { env: { /* ... */ } }
+
+  let instance: WebAssembly.Instance
+  try {
+    instance = (await WebAssembly.instantiateStreaming(
+      fetch(wasmUrl),  // 用导入的 URL，不是硬编码 '/add.wasm'
+      imports
+    )).instance
+  } catch (e) {
+    const bytes = await (await fetch(wasmUrl)).arrayBuffer()
+    instance = (await WebAssembly.instantiate(bytes, imports)).instance
+  }
+  // ...
+}
+```
+
+##### 2.2 `assetsInclude`配置
+
+在 `vite.config.ts` 里加上：
+
+```ts
+export default defineConfig({
+  assetsInclude: ['**/*.wasm'],
+})
+```
+
+Vite 会把 `.wasm` 当成**静态资源**处理。之后你可以这样写：
+
+```ts
+// 不需要 ?url 后缀
+import wasmUrl from './simple_wasm.wasm'
+
+fetch(wasmUrl)  // wasmUrl 是 Vite 解析后的真实 URL
+```
+
+这和 `import wasmUrl from './simple_wasm.wasm?url'` 效果基本相同——都是让 Vite 在构建时解析路径，返回可用的 URL 字符串。
+
+---
+
+优点：
+
+- 开发、生产路径都正确
+- 构建时会复制到 `dist/assets/` 并带 hash
+- 适合你这种**手动写 imports、演示流式加载**的场景
+
+---
+
+#### 方式三：`?init` 导入（Vite 内置封装）
+
+Vite 内置了 wasm 初始化 helper，会自动处理 `fetch` + `instantiateStreaming` 回退：
+
+```ts
+import initWasm from './simple_wasm.wasm?init'
+
+const instance = await initWasm({
+  env: {
+    abort: () => console.error('Wasm abort called'),
+    host_double: (x: number) => x * 2,
+  },
+})
+
+instance.exports.add(3, 4)
+```
+
+- 最省事
+- 但封装掉了 `instantiateStreaming` 的细节
+
+---
+
+#### 对比
+
+| 方式 | 文件位置 | 写法 | 适用场景 |
+|------|----------|------|----------|
+| `public/` | `public/xxx.wasm` | `fetch('/xxx.wasm')` | 固定路径、不参与打包 |
+| `?url` | `src/xxx.wasm` | `import url from './xxx.wasm?url'` | 手动 `instantiateStreaming` |
+| `?init` | `src/xxx.wasm` | `import init from './xxx.wasm?init'` | 快速集成，不关心底层细节 |
+
+---
+ 
+
+
 
 ### 4.3 服务器配置
 
@@ -734,30 +1088,7 @@ gzip_types application/wasm;
 
 跨域加载需要服务器返回 `Access-Control-Allow-Origin`。同源部署则无此问题。
 
-### 4.4 import 对象详解
-
-`imports` 对象的键必须与 Wasm 模块 import 段 **完全匹配**：
-
-```javascript
-// 假设 wasm 的 import 段为:
-//   (import "env" "memory" (memory 1))
-//   (import "env" "table" (table 0 anyfunc))
-//   (import "wasi_snapshot_preview1" "fd_write" (func ...))
-
-const imports = {
-  env: {
-    memory: new WebAssembly.Memory({ initial: 256 }),  // 256 页 = 16 MiB
-    table: new WebAssembly.Table({ initial: 0, element: 'anyfunc' }),
-  },
-  wasi_snapshot_preview1: {
-    fd_write: (fd, iov, iovcnt, pnum) => { /* ... */ return 0; },
-  },
-};
-```
-
-名称、模块名、类型任一不匹配，实例化都会抛出 `LinkError`。
-
-### 4.6 与 wasm-bindgen 生成物的关系
+### 4.5 与 wasm-bindgen 生成物的关系
 
 `wasm-pack build` 生成的 `pkg/` 目录结构：
 
@@ -811,37 +1142,180 @@ console.log(WebAssembly.Module.imports(module));
 
 本文以 **Rust** 为例，因为它的工具链最完善，且内存安全特性与 Wasm 沙箱模型天然契合。
 
-### 5.2 Rust 的 Wasm Target 对比
+### 5.2 Rust 生态全景关系图
 
-| Target | 说明 | 用途 |
-|--------|------|------|
-| `wasm32-unknown-unknown` | 无 OS，无标准库 I/O | **浏览器前端**（配合 wasm-bindgen） |
-| `wasm32-wasi` | WASI 快照 preview1 | 通用 WASI 运行时 |
-| `wasm32-wasip1` | WASI P1 | 新一代 WASI |
-| `wasm32-wasip1-threads` | WASI P1 + 线程 | **napi-rs Wasm 回退** |
+#### 5.2.1 Rust 的 编译 Target 
+编译目标也相当于编译层，就是一份rust源码，可以编译出支持什么指令的产物，比如在我机器，刚升级完成 `rust1.96`后， 查询全部可以目标非常多， 有 113 个。
 
-**不要混淆** `wasm32-unknown-unknown` 和 `wasm32-wasip1-threads`——前者给浏览器用，后者给 Node.js napi-rs 回退用，工具链和绑定完全不同。
-
-### 5.3 安装工具链
-
-```bash
-# 1. 安装 Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# 2. 添加 wasm32 编译目标
-rustup target add wasm32-unknown-unknown
-
-# 3. 安装 wasm-pack（构建 + 打包工具）
-cargo install wasm-pack
-
-# 4. 验证
-rustc --print target-list | grep wasm
-# 应看到 wasm32-unknown-unknown 等
+``` bash
+# 查询全部目标
+rustup target list
+# 输出
+aarch64-apple-darwin
+...
+wasm32-unknown-emscripten
+wasm32-unknown-unknown (installed)
+wasm32-wasip1
+wasm32-wasip1-threads
+wasm32-wasip2
+wasm32v1-none
+.....
+x86_64-pc-windows-gnullvm
+x86_64-pc-windows-msvc (installed)
+......
 ```
 
-### 5.4 创建项目
+#### 5.2.2 WASM 的编译层 > 绑定层 > 构建打包工具  和 运行时 的关系
+
+根据下图，理解一下 `编译层 > 绑定层 > 构建打包工具` 之间的依赖关系：
+
+```mermaid
+flowchart TB
+    subgraph compile["编译层（rustc + target）"]
+        T1["wasm32-unknown-unknown"]
+        T2["wasm32-wasip1 / wasip1-threads"]
+        T3["wasm32-wasip2"]
+    end
+
+    subgraph bind["绑定层"]
+        WB["wasm-bindgen"]
+        WIT["wit-bindgen"]
+        NAPI["napi-rs"]
+        EXT["extism/rust-pdk"]
+    end
+
+    subgraph build["构建/打包层"]
+        PACK["wasm-pack"]
+        TRUNK["trunk"]
+        WBCLI["wasm-bindgen-cli"]
+        WORKER["worker-build"]
+        CC["cargo-component"]
+    end
+
+    T1 --> WB
+    T1 --> PACK
+    T1 --> TRUNK
+    T2 --> NAPI
+    T2 --> WIT
+    T3 --> WIT
+    WB --> PACK
+    WB --> TRUNK
+    WB --> WORKER
+    WIT --> CC
+```
+
+
+#### 5.2.1 Rust 编译 Target（最基础，不算「库」但必须知道）
+
+| Target | 原理简述 | 典型配合工具 | 场景 | 活跃度 |
+|--------|----------|--------------|------|--------|
+| **`wasm32-unknown-unknown`** | 裸 Wasm，无 OS/syscall，标准库 I/O 不可用；一切外部能力靠 `import` | `wasm-bindgen`、`wasm-pack`、`trunk`、`workers-rs` | **浏览器**、Cloudflare Workers、Extism 插件 | ★★★★★（Rust 官方一等 target） |
+| **`wasm32-wasip1`** | WASI Preview 1，产出 core wasm module | `cargo-component`、`wit-bindgen` + `wasm-tools component new` | CLI 工具、通用 WASI 运行时 | ★★★★ |
+| **`wasm32-wasip2`** | WASI Preview 2，**可直接产出 Component** | `wit-bindgen`、`wasi` crate、`wasm-tools` | Component Model、跨语言组合、服务端 Wasm | ★★★★★（Rust 1.82+ 上游原生支持） |
+| **`wasm32-wasip1-threads`** | WASI P1 + 线程 + shared memory | `@napi-rs/cli` Wasm 回退 | **Node napi-rs 无原生 node 时的回退**、浏览器需 COOP/COEP | ★★★（napi-rs 主推） |
+
+不考虑 `wasi`， 所以 `wasm32-unknown-unknown` 是我们唯一的目标。
+
+#### 5.2.2 核心工具总表（按类别）
+
+  1. 绑定 / 互操作层（决定「Wasm 怎么跟宿主说话」）
+
+| 工具 | 类型 | 编译目标 | 核心原理 | 生态重要包 | 典型场景 | 活跃度 |
+|------|------|----------|----------|------------|----------|--------|
+| **[wasm-bindgen](https://github.com/rustwasm/wasm-bindgen)** | 绑定生成器（crate + CLI） | `wasm32-unknown-unknown` | 编译后 **后处理** `.wasm`：改写导出符号、生成 JS/TS 胶水、管理 linear memory 与字符串/闭包/table | `js-sys`、`web-sys`、`wasm-bindgen-futures`、`serde-wasm-bindgen`、`console_error_panic_hook`、`gloo`、`wasm-bindgen-test` | 浏览器、Workers、任何 JS 宿主 | ★★★★★ ~9k⭐，2026-06 仍在更新 |
+| **[wit-bindgen](https://github.com/bytecodealliance/wit-bindgen)** | WIT → 多语言绑定 | `wasm32-wasip1` / `wasip2` | 从 `.wit` 接口描述生成 Rust guest/host 代码；配合 `wasm-tools component new` 包装为 Component | `wit-bindgen-cli`、`wasm-tools`、`wasi` crate | Component Model、跨语言模块组合 | ★★★★ ~1.4k⭐，Bytecode Alliance 主力 |
+| **[napi-rs](https://github.com/napi-rs/napi-rs)** | Node 原生扩展 + Wasm 回退 | 原生：各平台 triple；Wasm：`wasm32-wasip1-threads` | `#[napi]` 宏展开为 Node-API C ABI；Wasm 路径用 WASI+线程模拟 N-API，由 `napi-wasm` 在 JS 侧加载 | `napi`、`napi-derive`、`napi-build`、`@napi-rs/cli`、`@napi-rs/wasm-runtime` | Node 高性能原生模块；无预编译 .node 时 Wasm 兜底 | ★★★★★ ~7.8k⭐，2026-06 活跃 |
+| **[extism/rust-pdk](https://github.com/extism/rust-pdk)** | 插件 PDK | `wasm32-unknown-unknown` | 统一 **bytes-in/bytes-out** ABI，不依赖 Component Model；宿主通过 Extism runtime 调用 | `extism`（宿主 SDK）、`extism-pdk` 各语言版 | 插件系统、可嵌入多宿主（Go/JS/Rust…） | ★★★ extism 主仓 ~5.6k⭐；rust-pdk 较小 |
+
+重点关注 `wasm-bindgen, napi-rs` 即可！
+
+  2. 构建 / 打包层（编排 cargo + 绑定 + 优化）
+
+| 工具 | 类型 | 编译目标 | 核心原理 | 生态重要包 | 典型场景 | 活跃度 |
+|------|------|----------|----------|------------|----------|--------|
+| **cargo build**（裸编译） | 最基础 | 任意 wasm target | `rustc` 直接产出 `.wasm`，无 JS 胶水、无 npm 元数据 | 无（需手写 imports 或另接绑定工具） | 学习、底层实验、Extism 极简插件 | ★★★★★ |
+| **[wasm-pack](https://github.com/rustwasm/wasm-pack)** | npm 打包 CLI | `wasm32-unknown-unknown` | `cargo build` → 调用 `wasm-bindgen` CLI → 生成 `pkg/`（`.js` + `_bg.wasm` + `package.json` + `.d.ts`）→ 可选 `wasm-opt` | 内置驱动 `wasm-bindgen-cli`、`wasm-opt` | **发布 Rust 库到 npm**、被 JS 项目引用 | ★★★★ ~7.2k⭐；维护节奏放缓，仍可用 |
+| **[wasm-bindgen-cli](https://github.com/rustwasm/wasm-bindgen)** | 底层 CLI | `wasm32-unknown-unknown` | 单独执行绑定后处理；`--target web/bundler/nodejs/deno` 控制加载方式 | 与 crate 版本 **必须严格一致** | 自定义构建管线、CI、Trunk/wasm-pack 底层 | ★★★★★（与 wasm-bindgen 同仓） |
+| **[trunk](https://github.com/trunk-rs/trunk)** | 前端应用打包器 | `wasm32-unknown-unknown` | 以 `index.html` 为入口，监听资源变更；内部调 `cargo` + `wasm-bindgen`，管理 SCSS/静态资源/HMR dev server | 常与 `leptos`、`yew` 配合；`Trunk.toml` 配置 | **Rust 全栈 SPA** 开发与部署 | ★★★★ ~4.3k⭐，2026-06 活跃（v0.22 beta） |
+| **[worker-build](https://github.com/cloudflare/workers-rs)** | Workers 专用构建 | `wasm32-unknown-unknown` | 包装 `wasm-bindgen` + wrangler 集成，适配 Cloudflare V8 isolate 环境 | `worker`、`worker-sys`、`worker-macros` | Cloudflare Workers 边缘函数 | ★★★★ workers-rs ~3.5k⭐ |
+| **[cargo-component](https://github.com/bytecodealliance/cargo-component)** | Component 构建 | `wasm32-wasip1` → 适配为 P2 Component | 编译 core module 后自动嵌入 WASI adapter，产出 Component；支持 WIT 依赖与 registry 发布 | `cargo component new/add/publish`、`warg` registry | 自定义 WIT 接口的 Component | ★★☆ ~588⭐；**正在被 `wasm32-wasip2` 原生编译取代** |
+| **[cargo-wasi](https://github.com/bytecodealliance/cargo-wasi)** | WASI 便捷子命令 | `wasm32-wasi` | 自动装 target、调 wasmtime 运行/测试 | 推荐改用 `cargo component` 或原生 wasip2 | 遗留 WASI 项目 | ★☆ **已弃用** |
+| **[cargo-wasix](https://github.com/wasix-org/cargo-wasix)** | WASIX 扩展子命令 | `wasm32-wasmer-wasi` | WASI 超集（线程、进程、socket 等），自动下载 Wasmer 工具链 | Wasmer 生态 | 需要 WASI 以上能力的应用 | ★★ ~62⭐，小众 |
+
+重点关注 `前三个` 即可！
+
+  3. 平台 SDK（编译出 Wasm，但绑定的是特定运行时）
+
+| 工具 | 类型 | 编译目标 | 核心原理 | 生态重要包 | 典型场景 | 活跃度 |
+|------|------|----------|----------|------------|----------|--------|
+| **[workers-rs](https://github.com/cloudflare/workers-rs)** | 边缘平台 SDK | `wasm32-unknown-unknown` | 通过 `wasm-bindgen` 导入 Workers JS Runtime API（KV、R2、Durable Objects 等） | `worker`、`worker-macros`、`worker-build` | Cloudflare Workers 全 Rust 开发 | ★★★★ ~3.5k⭐ |
+| **[Spin SDK](https://github.com/spinframework/spin)** | Fermyon 边缘框架 | 现文档多用 `wasm32-wasi` / Component 方向演进 | `#[http_component]` 宏 + Spin 运行时 HTTP 触发器 | `spin-sdk`、`spin` CLI | 边缘 HTTP 微服务、事件驱动 | ★★★★ Spin 生态活跃（Fermyon） |
+| **[Extism](https://github.com/extism/extism)** | 通用插件宿主 | 各 PDK 编译 wasm | 宿主加载 wasm，插件通过固定 ABI 读写 input/output | `rust-pdk`、多语言 PDK、`modsurfer` 分析 | 应用内插件、多语言扩展 | ★★★★ ~5.6k⭐ |
+
+  4. 前端框架（本身不「编译」，但驱动整条 Wasm 管线）
+
+| 框架 | 绑定方式 | 常用构建工具 | 原理要点 | 活跃度 |
+|------|----------|--------------|----------|--------|
+| **[Yew](https://github.com/yewstack/yew)** | `wasm-bindgen` | `trunk` | 类 React 组件模型，虚拟 DOM | ★★★★★ ~32.7k⭐ |
+| **[Leptos](https://github.com/leptos-rs/leptos)** | `wasm-bindgen` | `trunk`、`cargo-leptos` | 细粒度响应式 + SSR/CSR 混合 | ★★★★★ ~20.9k⭐ |
+| **[Dioxus](https://github.com/dioxuslabs/dioxus)** | `wasm-bindgen`（web 端） | `dx serve`、trunk | 跨平台 UI（Web/Desktop/Mobile） | ★★★★★ ~36.3k⭐ |
+
+  5. 优化 / 调试 / 分发（不直接编译，但生态必备）
+
+| 工具 | 作用 | 原理 | 活跃度 |
+|------|------|------|--------|
+| **[wasm-opt](https://github.com/WebAssembly/binaryen)**（Binaryen） | 二进制体积/性能优化 | 对 `.wasm` 做 dead code elimination、inlining 等 | ★★★★★ wasm-pack 默认集成 |
+| **[twiggy](https://github.com/rustwasm/twiggy)** | 体积分析 | 分析 `.wasm` 各函数/段占用 | ★★★ ~1.4k⭐ |
+| **[wasm-tools](https://github.com/bytecodealliance/wasm-tools)** | Component 工具链 | `component new/wit/compose` 等 | ★★★★ Bytecode Alliance 主力 |
+| **[wkg](https://github.com/bytecodealliance/wasm-pkg-tools)** | Component 包管理 | 从 OCI 拉取/发布 Wasm 组件 | ★★★ 新兴，Component 时代分发 |
+
+  6. Wasm 运行时（Rust 实现，**加载** wasm 而非「从 Rust 编译」）
+
+| 运行时 | 原理 | 与 Rust 编译关系 | 活跃度 |
+|--------|------|------------------|--------|
+| **[Wasmtime](https://github.com/bytecodealliance/wasmtime)** | Bytecode Alliance 参考实现，完整 WASI/Component 支持 | `cargo wasi run`、wasip2 测试、wit-bindgen host 侧 | ★★★★★ ~18.2k⭐ |
+| **[Wasmer](https://github.com/wasmerio/wasmer)** | 高性能运行时 + Wasmer Registry | `cargo-wasix`、Wasmer 边缘部署 | ★★★★★ ~20.8k⭐ |
+
+---
+
+######  按使用场景选型（速查）
+
+| 你想做什么 | 推荐路径 | 编译目标 |
+|------------|----------|----------|
+| 浏览器里跑 Rust 计算库，给 JS 调用 | `wasm-pack` / `wasm-bindgen` | `wasm32-unknown-unknown` |
+| Rust 写的完整 Web 应用（Leptos/Yew） | `trunk` + 框架 | `wasm32-unknown-unknown` |
+| 发布 npm 包给 React/Vue 用 | `wasm-pack build --target bundler` | `wasm32-unknown-unknown` |
+| Node 高性能扩展，兼顾无预编译平台 | `napi-rs`（原生 + Wasm 回退） | 原生 triple / `wasm32-wasip1-threads` |
+| Cloudflare Workers | `workers-rs` + `worker-build` | `wasm32-unknown-unknown` |
+| 边缘 HTTP 服务（Spin/Fermyon） | `spin-sdk` | `wasm32-wasi` / Component |
+| 跨语言 Component、WASI 服务端 | `wit-bindgen` + `wasm32-wasip2` | `wasm32-wasip2` |
+| 应用内插件系统 | `extism` + `rust-pdk` | `wasm32-unknown-unknown` |
+| 学习/理解底层 | 裸 `cargo build --target wasm32-unknown-unknown` | 最基础 |
+
+---
+
+######  几个容易混淆的点
+
+1. **wasm-pack ≠ wasm-bindgen**：前者是打包编排器，后者是绑定核心；Trunk、worker-build 也都底层依赖 wasm-bindgen。
+
+2. **napi-rs 主路径不是 Wasm**：它首要产出各平台 `.node`；Wasm 是 **回退方案**，且固定 `wasm32-wasip1-threads`，与浏览器用的 `unknown-unknown` 完全不同。
+
+3. **cargo-component 正在被取代**：Rust 1.82+ 的 `wasm32-wasip2` 可直接 `cargo build` 出 Component；仅当需要非 WASI 的自定义 WIT 时，`cargo-component` 仍有价值。
+
+4. **Neon 不产 Wasm**：它是 Rust 写 Node 原生模块的另一条路（绑 V8），与你问的 Wasm 路径无关。
+
+5. **版本耦合陷阱**：`wasm-bindgen` crate 与 `wasm-bindgen-cli` 版本必须一致，否则构建报莫名错误。
+
+
+### 5.3 wasm-pack 环境搭建
+
+第四章，我们没有使用任何 `工具链和绑定库` 实现了一个最简单的原生Wasm 编译， 本小节我们搭建一下成熟的工具环境。
 
 ```bash
+# 1. 安装 wasm-pack（构建 + 打包工具）
+cargo install wasm-pack
+
+# 2. 创建lib项目
 cargo new --lib my-wasm
 cd my-wasm
 ```

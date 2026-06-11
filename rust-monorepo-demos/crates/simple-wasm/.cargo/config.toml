@@ -1,3 +1,11 @@
+# Rust 编译到 wasm32-unknown-unknown 时，本来就会在模块内部创建 memory（栈、静态数据 .rodata 等都在里面）。
+# 不加 --export-memory 时，这块内存 Wasm 内部能用，宿主 JS 拿不到
+
+# export / import 二选一：
+#   --export-memory  Wasm 自建 memory 并 export → JS 用 instance.exports.memory
+#   --import-memory  使用 imports.env.memory   → JS 在实例化前 new WebAssembly.Memory 传入
+
+# --export-memory 和 --import-memory 描述的是同一块线性内存（memory 0），所以是互斥的关系
 [target.wasm32-unknown-unknown]
 rustflags = [
     "-C", "link-arg=--export-memory",

@@ -8,6 +8,7 @@
 //!
 //! 产物：
 //!   target/wasm32-unknown-unknown/release/simple_wasm.wasm
+//!    
 
 #![no_std]
 
@@ -15,7 +16,7 @@ use core::panic::PanicInfo;
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    loop {}
+    unsafe { abort() }
 }
 
 // ---------------------------------------------------------------------------
@@ -24,6 +25,7 @@ fn panic(_info: &PanicInfo) -> ! {
 
 #[link(wasm_import_module = "env")]
 extern "C" {
+    fn abort() -> !;
     /// 宿主提供的函数：将 i32 加倍（演示 import 函数）
     fn host_double(value: i32) -> i32;
 }
@@ -47,14 +49,16 @@ pub extern "C" fn add_then_double(a: i32, b: i32) -> i32 {
 }
 
 // ---------------------------------------------------------------------------
-// memory — 线性内存读写
+// memory — 线性内存读写， 通过--export-memory 导出了
+// Wasm 模块只有一块 WebAssembly.Memory：一段从 0 开始的连续字节数组。
+// Rust 的栈、静态数据、堆（若有）都在这块内存里。 详见 【simple-wasm\.cargo\config.toml】
 // ---------------------------------------------------------------------------
 
 /// 导出：将 a + b 的结果写入线性内存的 offset 处（4 字节 i32）
 #[no_mangle]
 pub extern "C" fn add_and_store(a: i32, b: i32, offset: i32) -> i32 {
     let result = add(a, b);
-    // SAFETY: offset 由宿主保证在有效内存范围内
+    // SAFETY: offset 由宿主保证在有效内存范围内,  生成指令为：  i32.store offset=0  ; 
     unsafe {
         (offset as *mut i32).write_volatile(result);
     }

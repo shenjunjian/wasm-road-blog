@@ -1,9 +1,12 @@
 import wasmUrl from './simple_wasm.wasm?url'
 
 async function loadWasm() {
+  // 若 wasm import "env"."memory"，实例化前由宿主创建并传入
+  const memory = new WebAssembly.Memory({ initial: 17 })
+
   const imports = {
     env: {
-      // 如果 wasm 模块 import 了 "env"."abort"，需要提供此函数
+      memory,
       abort: () => console.error('Wasm abort called'),
       host_double: (x) => x * 2,
     },
@@ -31,6 +34,12 @@ async function loadWasm() {
   call_via_table(0, 5, 3) = ${instance.exports.call_via_table(0, 5, 3)} <br>
   call_via_table(1, 5, 3) = ${instance.exports.call_via_table(1, 5, 3)} <br>`;
   document.getElementById('output').innerHTML = result;
+
+  // JS 读线性内存， 可能是--import-memory 或 --export-memory 模式
+  const memExport = new Int32Array(instance.exports.memory.buffer)
+  const memImport = new Int32Array(memory.buffer)
+   
+  console.log("instance=", instance, "memExport=", memExport, "memImport=", memImport);
 }
 
 loadWasm();
