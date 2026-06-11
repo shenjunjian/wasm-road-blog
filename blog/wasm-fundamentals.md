@@ -1311,55 +1311,46 @@ flowchart TB
 
 第四章，我们没有使用任何 `工具链和绑定库` 实现了一个最简单的原生Wasm 编译， 本小节我们搭建一下成熟的工具环境。
 
+请参阅 [wasm-pack Book](https://wasm.rust-lang.net.cn/wasm-pack/book/)
+
+###### 常用命令速查
+
+| 命令 | 说明 |
+|------|------|
+| `wasm-pack build` | 默认 **release** 构建，生成 `pkg/`（JS 胶水 + `_bg.wasm` + `package.json`） |
+| `wasm-pack build --dev` | **debug** 构建，保留调试符号，体积更大、编译更快 |
+| `wasm-pack build --target <T>` | 指定 JS 加载方式，见下表 |
+| `wasm-pack build --out-dir pkg` | 自定义输出目录（默认 `pkg`） |
+| `wasm-pack build -- --features foo` | `--` 后的参数原样传给 `cargo build` |
+| `wasm-pack test` | 在 headless 浏览器（默认 Chrome）中跑 `#[wasm_bindgen_test]` 测试 |
+| `wasm-pack test --node` | 在 Node.js 中跑测试 |
+| `wasm-pack publish` | 将 `pkg/` 发布到 npm（需已登录 `npm login`） |
+| `wasm-pack new my-app` | 从官方模板脚手架创建新项目 |
+| `wasm-pack --version` | 查看当前安装版本 |
+
+**`--target` 取值**（第 6 章有更详细说明）：
+
+| target | 典型场景 |
+|--------|----------|
+| `web` | 纯 HTML + `<script type="module">`，需手动 `await init()` |
+| `bundler` | Vite / Webpack / Rollup 等前端打包器（**最常用**） |
+| `nodejs` | Node.js，CommonJS + `fs` 读 wasm |
+| `deno` | Deno 运行时 |
+| `no-modules` | 无模块系统的旧式 `<script>` 标签 |
+
 ```bash
 # 1. 安装 wasm-pack（构建 + 打包工具）
 cargo install wasm-pack
+# npm install -g wasm-pack   # npm 也可以安装
 
 # 2. 创建lib项目
-cargo new --lib my-wasm
-cd my-wasm
+wasm-pack new wasm-pack-demo
 ```
 
-**`Cargo.toml`**
+详见 `wasm-pack-demo` 示例
 
-```toml
-[package]
-name = "my-wasm"
-version = "0.1.0"
-edition = "2021"
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-wasm-bindgen = "0.2"
-
-[profile.release]
-opt-level = "s"          # 优化体积（"s" = size, "3" = speed）
-lto = true               # 链接时优化，减小体积
-```
-
-**`src/lib.rs`**
-
-```rust
-use wasm_bindgen::prelude::*;
-
-/// 导出加法函数给 JavaScript 调用
-#[wasm_bindgen]
-pub fn add(a: i32, b: i32) -> i32 {
-    a + b
-}
-
-/// 导出斐波那契（展示计算密集型场景）
-#[wasm_bindgen]
-pub fn fibonacci(n: u32) -> u32 {
-    match n {
-        0 => 0,
-        1 => 1,
-        _ => fibonacci(n - 1) + fibonacci(n - 2),
-    }
-}
-```
+ 
+ 
 
 ### 5.5 构建流程
 
