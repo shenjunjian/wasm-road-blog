@@ -701,10 +701,10 @@ rustflags = [
 ```
 
 ```bash
- # 构建发布
+ # 构建发布 大约 838 字节
  cargo build -p simple-wasm --target wasm32-unknown-unknown --release
 
- # 构建（含 DWARF 调试信息）：
+ # 构建（含 DWARF 调试信息）约 603 kb
  cargo build -p simple-wasm --target wasm32-unknown-unknown
 ```
 
@@ -712,9 +712,26 @@ rustflags = [
  
  正常情况下，每个 Rust 二进制或库项目都会隐式链接 std 标准库。
 
-增加#![no_std] 全局属性，用于声明当前 crate ‌不链接 Rust 标准库（std）‌，仅使用核心库（core）。`core 模式`是rust的最小子集，不依赖任何操作系统，只包括：`基础类型`， `基础 trait`, `内存操作`, `数学运算`， 不包含 `std` 提供的库： `堆分配 Box,Vec,String` `线程， IO, 网络`, `集合类 Map,Set` `操作系统相关`， 所以体积更小， 多用于`嵌入式， 操作系统内核， wasm模块`等场合。
+增加#![no_std] 全局属性，用于声明当前 crate ‌不链接 Rust 标准库（std）‌，仅使用核心库（core）。`core 模式`是rust的最小子集，不依赖任何操作系统，只包括：`基础类型`， `基础 trait`, `内存操作`, `数学运算`， 不包含 `std` 提供的库： `堆分配 Box,Vec,String` , `线程， IO, 网络`, `集合类 HashMap,HashSet` `操作系统相关`， 所以体积更小， 多用于`嵌入式， 操作系统内核， wasm模块`等场合。 
 
-`core 模式`没有标准库的默认 panic 处理，所以必须提供 #[panic_handler]， 如果生产环境更常用 wasm-bindgen 或带 backtrace 的 panic hook。
+在  `simple-wasm` 示例中，它有以下注意点：
+
++  `core 模式`没有标准库的默认 panic 处理，所以必须提供 #[panic_handler]， 如果生产环境更常用 wasm-bindgen 或带 backtrace 的 panic hook。
++  不能直接使用 `std` 里的 `String、Vec、HashMap、HashSe、Box`,编译器会报错。当前程序中使用了基础类型：i32、u8、bool、&str、切片 &[T]、固定数组 [T; N],这些都是合法的。
+ 
+如果既要 no_std，又想要动态集合，可以额外引入 alloc crate：
+
+```rust
+#![no_std]
+
+extern crate alloc;
+
+use alloc::string::String;
+use alloc::vec::Vec;
+```
+alloc 只提供类型定义，还需要全局分配器（如 wee_alloc、dlmalloc）。wasm32-unknown-unknown 默认没有系统分配器，要自己配置，**体积和复杂度**都会上去.
+
+更常见的做法是， 不要加 no_std， 使用  `wasm-bindgen 常规路线`，隐式链接 std，因此可以用 String、Vec 等, 详见第五章。
 
 3. #[no_mangle]
 
@@ -1326,17 +1343,19 @@ flowchart TB
 | `wasm-pack test --node` | 在 Node.js 中跑测试 |
 | `wasm-pack publish` | 将 `pkg/` 发布到 npm（需已登录 `npm login`） |
 | `wasm-pack new my-app` | 从官方模板脚手架创建新项目 |
-| `wasm-pack --version` | 查看当前安装版本 |
+| `wasm-pack --version` | 查看当前安装版本 0.15.0 |
 
 **`--target` 取值**（第 6 章有更详细说明）：
 
 | target | 典型场景 |
 |--------|----------|
 | `web` | 纯 HTML + `<script type="module">`，需手动 `await init()` |
-| `bundler` | Vite / Webpack / Rollup 等前端打包器（**最常用**） |
+| `bundler` | Vite / Webpack / Rollup 等前端打包器（**最常用**），也是target的默认值 |
 | `nodejs` | Node.js，CommonJS + `fs` 读 wasm |
 | `deno` | Deno 运行时 |
 | `no-modules` | 无模块系统的旧式 `<script>` 标签 |
+
+使用它的命令，创建`wasm-pack-demo` 示例: 
 
 ```bash
 # 1. 安装 wasm-pack（构建 + 打包工具）
@@ -1345,51 +1364,104 @@ cargo install wasm-pack
 
 # 2. 创建lib项目
 wasm-pack new wasm-pack-demo
+
+# 3. 构建，产物输出到 pkg 目录
+wasm-pack build   
+wasm-pack build --dev  
 ```
 
-详见 `wasm-pack-demo` 示例
+### 5.4 wasm-pack 示例工程解析
+观察示例模板 Cargo.toml 中的配置较低，可以升级上来。
 
- 
- 
+```toml
+[package]
+name = "wasm-pack-demo"
+edition = "2021"
 
-### 5.5 构建流程
+[lib]
+crate-type = ["cdylib", "rlib"]
 
-#### 方式一：纯 cargo build（裸 wasm）
+[dependencies]
+wasm-bindgen = "0.2.123"
 
-```bash
-cargo build --target wasm32-unknown-unknown --release
+[dev-dependencies]
+wasm-bindgen-test = "0.3.73"
+
+[profile.release]
+opt-level = "s"
 ```
 
-产物：`target/wasm32-unknown-unknown/release/my_wasm.wasm`
+`cdylib` 是 C Dynamic Library（C 动态库格式），给浏览器 / JS 用的 WASM ,在 wasm32-unknown-unknown 目标上，含义是：生成 .wasm 文件，且不带 start  
+`rlib`  是给 Rust 工具链用的静态库，Rust 默认的库格式， 给示例模板的 test 代码用的。
 
-这是 **裸 wasm**，缺少 JS 绑定，无法直接在浏览器中调用导出函数（没有内存管理和类型转换）。
+编译后有**2个不同格式的 Wasm**，它们是**同一次构建流水线里不同阶段、不同用途的产物**。
 
-#### 方式二：wasm-pack build（推荐）
+| 文件 | 角色 |
+|------|------|
+| `target/wasm32-unknown-unknown/debug/wasm_pack_demo.wasm` | **rustc 直接输出的原始 cdylib**（中间产物，含大量调试段） |
+| `pkg/wasm_pack_demo_bg.wasm` | **wasm-bindgen 处理后的浏览器可用模块**（配合 `pkg/*.js` 使用） |
 
-```bash
-wasm-pack build --target web --out-dir pkg
-```
+wasm-pack 工具打包的流程：
 
-wasm-pack 在内部执行：
-
-```
 1. cargo build --target wasm32-unknown-unknown --release
 2. wasm-bindgen target/wasm32-unknown-unknown/release/my_wasm.wasm
    → 生成 pkg/my_wasm.js（JS 胶水）
    → 生成 pkg/my_wasm_bg.wasm（处理后的 wasm）
 3. 生成 pkg/package.json
-4. 可选：wasm-opt 优化体积
+4. 可选：wasm-opt 优化体积（release）
+
+```text
+Rust 源码
+    │
+    ▼
+cargo build --target wasm32-unknown-unknown
+    │
+    ▼
+target/.../wasm_pack_demo.wasm     ← 原始 Wasm（~2.4 MB debug）
+    │
+    ▼
+wasm-bindgen CLI（wasm-pack 自动调用）
+    │
+    ├── pkg/wasm_pack_demo_bg.wasm  ← 处理后 Wasm（~19 KB）
+    ├── pkg/wasm_pack_demo_bg.js    ← 胶水层
+    └── pkg/wasm_pack_demo.js       ← 入口
+    │
+    ▼（release 模式下还会跑 wasm-opt 进一步压缩）
 ```
 
-#### 方式三：手动 wasm-bindgen
+ 命名上的 `_bg` 是什么意思？
 
-```bash
-cargo build --target wasm32-unknown-unknown --release
-wasm-bindgen --target web --out-dir pkg \
-  target/wasm32-unknown-unknown/release/my_wasm.wasm
+`_bg` = **background**（wasm-bindgen 的惯例命名）：
+
+- `wasm_pack_demo_bg.wasm`：核心 Wasm 模块  
+- `wasm_pack_demo_bg.js`：与 Wasm 内存、导出函数打交道的胶水  
+- `wasm_pack_demo.js`：对外 API 入口（例如 `greet`）
+
+`pkg/wasm_pack_demo.js` 里就是这样加载的：
+
+```1:9:d:\WORK\wasm-road-blog\rust-monorepo-demos\crates\wasm-pack-demo\pkg\wasm_pack_demo.js
+/* @ts-self-types="./wasm_pack_demo.d.ts" */
+import * as wasm from "./wasm_pack_demo_bg.wasm";
+import { __wbg_set_wasm } from "./wasm_pack_demo_bg.js";
+
+__wbg_set_wasm(wasm);
+wasm.__wbindgen_start();
+export {
+    greet
+} from "./wasm_pack_demo_bg.js";
 ```
 
-### 5.6 体积优化
+---
+
+| 场景 | 用哪个 |
+|------|--------|
+| 在网页 / npm 包里引用 | `pkg/` 整目录（JS + `_bg.wasm`） |
+| 用 DevTools 做源码级调试 | `wasm-pack build --dev`，并保留 DWARF（见博客第 220 行附近说明） |
+| 看 rustc 原始输出、写自定义构建脚本 | `target/.../wasm_pack_demo.wasm` |
+| 生产部署 | `wasm-pack build`（release + wasm-opt），不要用 `target/debug/` 里那个 |
+
+
+### 5.5 wasm-pack 打包体积优化方案
 
 Wasm 文件大小直接影响加载速度。常用优化手段：
 
@@ -1401,36 +1473,9 @@ Wasm 文件大小直接影响加载速度。常用优化手段：
 | wasm-opt | `wasm-pack build` 自动调用 | 二进制级别优化，可减小 20%–50% |
 | `#![no_std]` | 不使用标准库 | 大幅减小，但开发难度高 |
 
-```toml
-# 使用 wee_alloc 示例
-[dependencies]
-wee_alloc = "0.4"
+`wee_alloc` 虽然优化10+ kb的体积，但是引起性能下降。它已经7年多未更新了，随着 wasm-opt 的升级，可以消除部分未使用的分配器代码了。 更新的 `dlmalloc` 或 `mimalloc` 分配器也是候选方式。如果项目足够简单，请使用#![no_std] 来彻底删除分配器代码。
 
-# 在 lib.rs 顶部
-#[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
-```
-
-### 5.7 其他语言的快速说明
-
-#### C/C++（Emscripten）
-
-```bash
-emcc hello.c -o hello.js    # 生成 hello.js + hello.wasm
-```
-
-Emscripten 会生成大量 JS 胶水代码（包含虚拟文件系统、SDL 等），体积通常比 Rust + wasm-bindgen 大得多，但适合移植大型 C/C++ 项目。
-
-#### AssemblyScript
-
-```typescript
-// assembly/index.ts
-export function add(a: i32, b: i32): i32 {
-  return a + b;
-}
-```
-
-语法类似 TypeScript，但只支持有限类型。编译后可直接在浏览器使用。
+`opt-level = "s" | "z"` 它是编译器的优化参数， s 是优选参数， z 是极端压缩，在 s 的基础下再减少 5%~10%。 但牺牲了循环展开，向量化等，会有性能损失，嵌入式设备才有必要这么一点优化。
 
 ### 本章小结
 
@@ -1438,43 +1483,9 @@ Rust 编译 Wasm 的核心是 `wasm32-unknown-unknown` + `cdylib` + `wasm-pack`�
 
 ---
 
-## 第 6 章：wasm-pack 与 wasm-bindgen 生态
+## 第 6 章：  wasm-bindgen 深入
 
-### 6.1 生态全景
-
-```
-你的 Rust 代码
-    ↓ #[wasm_bindgen] 宏
-wasm-bindgen（crate + CLI）
-    ↓ 生成
-pkg/my_wasm.js（JS 胶水） + pkg/my_wasm_bg.wasm
-    ↓ 被浏览器/打包器加载
-JavaScript 调用 Rust 函数
-```
-
-```
-wasm-pack = cargo build + wasm-bindgen CLI + package.json 生成 + wasm-opt
-```
-
-### 6.2 wasm-pack 的 `--target` 详解
-
-| target | 输出特点 | 使用场景 |
-|--------|---------|---------|
-| `web` | ES Module，`init()` 手动调用 | 直接在 HTML `<script type="module">` 中使用 |
-| `bundler` | ES Module，不内联 wasm 路径 | Webpack / Vite / Rollup 打包 |
-| `nodejs` | CommonJS，`fs.readFileSync` 加载 wasm | Node.js 环境 |
-| `no-modules` | 全局变量，`<script>` 标签加载 | 旧式 HTML，无打包器 |
-| `deno` | Deno 兼容格式 | Deno 运行时 |
-
-```bash
-# 前端项目（Vite/Webpack）用这个
-wasm-pack build --target bundler --out-dir pkg
-
-# 纯 HTML 演示用这个
-wasm-pack build --target web --out-dir pkg
-```
-
-### 6.3 wasm-bindgen 深入
+通过上面一章，我们看到一个 wasm-pack 模板工程，只依赖了 `wasm-bindgen`  这个包， 所以本质上 rust 开发wasm程序就是学习 `wasm-bindgen` 和它的相关生态包。
 
 #### 导出函数给 JS
 
