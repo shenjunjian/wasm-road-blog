@@ -1162,7 +1162,7 @@ console.log(WebAssembly.Module.imports(module));
 ### 5.2 Rust 生态全景关系图
 
 #### 5.2.1 Rust 的 编译 Target 
-编译目标也相当于编译层，就是一份rust源码，可以编译出支持什么指令的产物，比如在我机器，刚升级完成 `rust1.96`后， 查询全部可以目标非常多， 有 113 个。
+编译目标也相当于编译层，就是一份rust源码，可以编译出支持什么指令的产物，比如在我机器，刚升级完成 `rust1.96`后， 查询全部可以目标有 113 个，精简如下：
 
 ``` bash
 # 查询全部目标
@@ -1315,7 +1315,7 @@ flowchart TB
 
 1. **wasm-pack ≠ wasm-bindgen**：前者是打包编排器，后者是绑定核心；Trunk、worker-build 也都底层依赖 wasm-bindgen。
 
-2. **napi-rs 主路径不是 Wasm**：它首要产出各平台 `.node`；Wasm 是 **回退方案**，且固定 `wasm32-wasip1-threads`，与浏览器用的 `unknown-unknown` 完全不同。
+2. **napi-rs 主路径不是 Wasm**：它首要产出各平台 `.node`；Wasm 是 **回退方案**，且目标固定为 `wasm32-wasip1-threads`，与浏览器用的 `wasm32-unknown-unknown` 完全不同。
 
 3. **cargo-component 正在被取代**：Rust 1.82+ 的 `wasm32-wasip2` 可直接 `cargo build` 出 Component；仅当需要非 WASI 的自定义 WIT 时，`cargo-component` 仍有价值。
 
@@ -1328,7 +1328,7 @@ flowchart TB
 
 第四章，我们没有使用任何 `工具链和绑定库` 实现了一个最简单的原生Wasm 编译， 本小节我们搭建一下成熟的工具环境。
 
-请参阅 [wasm-pack Book](https://wasm.rust-lang.net.cn/wasm-pack/book/)
+请参阅 [wasm-pack文档](https://wasm-bindgen.github.io/wasm-pack/)
 
 ###### 常用命令速查
 
@@ -1473,9 +1473,36 @@ Wasm 文件大小直接影响加载速度。常用优化手段：
 | wasm-opt | `wasm-pack build` 自动调用 | 二进制级别优化，可减小 20%–50% |
 | `#![no_std]` | 不使用标准库 | 大幅减小，但开发难度高 |
 
-`wee_alloc` 虽然优化10+ kb的体积，但是引起性能下降。它已经7年多未更新了，随着 wasm-opt 的升级，可以消除部分未使用的分配器代码了。 更新的 `dlmalloc` 或 `mimalloc` 分配器也是候选方式。如果项目足够简单，请使用#![no_std] 来彻底删除分配器代码。
+`wee_alloc` 虽然优化10+ kb的体积，但是引起性能下降。且它已经7年多未更新了，随着 wasm-opt 的升级，可以消除部分未使用的分配器代码了。 较新的 `dlmalloc` 或 `mimalloc` 分配器库也是候选方式。如果项目足够简单，请使用#![no_std] 来彻底删除分配器代码。
 
 `opt-level = "s" | "z"` 它是编译器的优化参数， s 是优选参数， z 是极端压缩，在 s 的基础下再减少 5%~10%。 但牺牲了循环展开，向量化等，会有性能损失，嵌入式设备才有必要这么一点优化。
+
+### 5.6 wasm-pack 模板中为什么没有 `.cargo/config.toml`?
+
+ `.cargo/config.toml`只是向 `rustc` 传 `rustflags` 的**一种方式**，等价手段还有：
+
+| 方式 | 示例 |
+|------|------|
+| 项目级 `.cargo/config.toml` | `simple-wasm` 用的就是这种 |
+| 环境变量 | `RUSTFLAGS='-C link-arg=--export-memory'` |
+| 工作区根目录 `.cargo/config.toml` | 对整个 workspace 生效 |
+
+官方 [wasm-pack-template](https://github.com/rustwasm/wasm-pack-template) 只有 `Cargo.toml`，没有 `.cargo/config.toml`。
+
+实际机制是：**`rustc` + `wasm-ld` 在 `cdylib` + `wasm32-unknown-unknown` 下，默认就会导出 memory**。
+
+我刚在你本地构建的 `wasm-pack-demo` 上验证过：
+
+**原始 rustc 产物**（wasm-bindgen 处理前）：
+```text
+Memory[1]:
+ - memory[0] pages: initial=17
+Export[75]:
+ - memory[0] -> "memory"
+```
+
+全程没有 `.cargo/config.toml`，memory 已经被导出为 `"memory"`。
+
 
 ### 本章小结
 
@@ -1487,96 +1514,14 @@ Rust 编译 Wasm 的核心是 `wasm32-unknown-unknown` + `cdylib` + `wasm-pack`�
 
 通过上面一章，我们看到一个 wasm-pack 模板工程，只依赖了 `wasm-bindgen`  这个包， 所以本质上 rust 开发wasm程序就是学习 `wasm-bindgen` 和它的相关生态包。
 
-#### 导出函数给 JS
+[wasm-bindgen 文档](https://wasm-bindgen.github.io/wasm-bindgen/)
 
-```rust
-use wasm_bindgen::prelude::*;
+在 `wasm-pack-demo`中，我们导出了 `rust侧` 的一个 `greet`函数给`JS 侧`使用， 可以仔细查看 `\wasm-pack-demo\pkg\wasm_pack_demo.js` 和 `\wasm-pack-demo\pkg\wasm_pack_demo_bg.js` 来学习 wasm-pack 帮我们生成的js 逻辑，它包含字符串处理和在模块启动时设置 WebAssembly 的 externref 引用表（Reference Types 特性）
 
-// 基本导出
-#[wasm_bindgen]
-pub fn greet(name: &str) -> String {
-    format!("Hello, {name}!")
-}
+下面我们将以更复杂的例子`wasm-pack-interaction-demo`，来演示`rust侧` 与 `JS 侧`的互操作。
 
-// 导出结构体为 JS 类
-#[wasm_bindgen]
-pub struct Counter {
-    value: i32,
-}
 
-#[wasm_bindgen]
-impl Counter {
-    #[wasm_bindgen(constructor)]
-    pub fn new(start: i32) -> Counter {
-        Counter { value: start }
-    }
-
-    pub fn increment(&mut self) -> i32 {
-        self.value += 1;
-        self.value
-    }
-
-    pub fn get(&self) -> i32 {
-        self.value
-    }
-}
-```
-
-JS 侧：
-
-```javascript
-import init, { greet, Counter } from './pkg/my_wasm.js';
-
-await init();
-
-console.log(greet('World'));       // "Hello, World!"
-
-const counter = new Counter(10);
-console.log(counter.increment());  // 11
-console.log(counter.get());        // 11
-```
-
-#### 从 JS 导入函数
-
-```rust
-use wasm_bindgen::prelude::*;
-
-// 导入 JS 的 alert 函数
-#[wasm_bindgen]
-extern "C" {
-    fn alert(s: &str);
-
-    #[wasm_bindgen(js_namespace = console)]
-    fn log(s: &str);
-}
-
-#[wasm_bindgen]
-pub fn run() {
-    alert("Hello from Rust via JS alert!");
-    log("Logged from Rust via console.log");
-}
-```
-
-#### 接收 JS 回调（闭包）
-
-```rust
-use wasm_bindgen::prelude::*;
-
-#[wasm_bindgen]
-pub fn call_callback(callback: &js_sys::Function, value: i32) {
-    let this = JsValue::NULL;
-    let arg = JsValue::from(value);
-    callback.call1(&this, &arg).unwrap();
-}
-```
-
-JS 侧：
-
-```javascript
-call_callback((v) => console.log('received:', v), 42);
-```
-
-### 6.4 js-sys：绑定 JavaScript 内置对象
+### 6.1 js-sys：绑定 JavaScript 内置对象
 
 [js-sys](https://docs.rs/js-sys/) 提供对 JavaScript 全局对象的绑定：
 
@@ -1604,7 +1549,7 @@ pub fn create_array() -> JsValue {
 }
 ```
 
-### 6.5 web-sys：绑定 Web API
+### 6.2 web-sys：绑定 Web API
 
 [web-sys](https://docs.rs/web-sys/) 提供对浏览器 Web API 的绑定。**必须** 在 `Cargo.toml` 中按需启用 feature，否则 crate 体积会爆炸：
 
@@ -1643,7 +1588,7 @@ pub fn manipulate_dom() -> Result<(), JsValue> {
 }
 ```
 
-### 6.6 wasm-bindgen-futures：异步互操作
+### 6.3 wasm-bindgen-futures：异步互操作
 
 浏览器中大量 API 是异步的（`fetch`、IndexedDB 等）。`wasm-bindgen-futures` 让你能在 Rust 中 `.await` JS 的 `Promise`：
 
