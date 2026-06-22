@@ -1,3 +1,5 @@
+#[path = "rust-vars.rs"]
+mod rust_vars;
 mod utils;
 
 use wasm_bindgen::prelude::*;

@@ -4,9 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "wasm:build": "cd ../../../rust-monorepo-demos/crates/wasm-pack-interaction-demo && wasm-pack build --dev --target web --out-dir pkg",
+    "predev": "pnpm wasm:build",
+    "prebuild": "pnpm wasm:build",
     "dev": "vp dev",
     "build": "tsc && vp build",
     "preview": "vp preview"
+  },
+  "dependencies": {
+    "wasm-pack-interaction-demo": "file:../../../rust-monorepo-demos/crates/wasm-pack-interaction-demo/pkg"
   },
   "devDependencies": {
     "typescript": "~6.0.2",
