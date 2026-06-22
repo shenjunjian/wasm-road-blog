@@ -606,7 +606,7 @@ const bytes = new Uint8Array(memory.buffer, ptr, len);
 const jsString = new TextDecoder('utf-8').decode(bytes);
 console.log(jsString);
 ```
-   有关string的提案有很多，大都夭折了，目前可以关注 3.2 节的`JS String Builtins（chrome 130+)`,通过 import 调用宿主 JS 字符串 API。 另外实际开发时，不需要关注这个，大多数开发语言会处理字符串的问题，`wasm-bindgen` 参见 6.7 节。
+   有关string的提案有很多，大都夭折了，目前可以关注 3.2 节的`JS String Builtins（chrome 130+)`,通过 import 调用宿主 JS 字符串 API。 另外实际开发时，不需要关注这个，大多数开发语言会处理字符串的问题，`wasm-bindgen` 参见 6.5 节。
 
 
 ### 3.4 内存模型深入
@@ -1520,38 +1520,180 @@ Rust 编译 Wasm 的核心是 `wasm32-unknown-unknown` + `cdylib` + `wasm-pack`�
 
 下面我们将以更复杂的例子`wasm-pack-interaction-demo`，来演示`rust侧` 与 `JS 侧`的互操作。
 
+### 生态关系概览
 
-### 6.1 js-sys：绑定 JavaScript 内置对象
+这四个 crate 构成 Rust/Wasm 与 JavaScript 互操作的完整栈，层次由底向上依次叠加：
 
-[js-sys](https://docs.rs/js-sys/) 提供对 JavaScript 全局对象的绑定：
+```mermaid
+graph TB
+    subgraph app["你的 Rust/Wasm 应用"]
+        A["#[wasm_bindgen] 导出/导入"]
+    end
+    WBF["wasm-bindgen-futures<br/>Promise ↔ Future 桥接"]
+    WS["web-sys<br/>浏览器 Web API（DOM、fetch、Canvas…）"]
+    JS["js-sys<br/>ECMAScript 内置对象（Array、Promise、JSON…）"]
+    WB["wasm-bindgen<br/>运行时 + #[wasm_bindgen] 宏 + JsValue"]
 
-| 绑定 | 对应 JS |
-|------|---------|
-| `JsValue` | 任意 JS 值 |
-| `Array` | `Array` |
-| `Object` | `Object` |
-| `Promise` | `Promise` |
-| `Map` / `Set` | `Map` / `Set` |
-| `Date` | `Date` |
-| `JSON` | `JSON` |
-| `Math` | `Math` |
-| `Reflect` | `Reflect` |
+    app --> WBF
+    app --> WS
+    app --> JS
+    app --> WB
+    WBF --> JS
+    WS --> JS
+    JS --> WB
+    WB -->|"生成 JS 胶水代码"| GLUE["wasm-pack / wasm-bindgen CLI"]
+```
+
+| Crate | 文档 | 定位 |
+|-------|------|------|
+| [wasm-bindgen](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/) | 核心运行时 | 提供 `#[wasm_bindgen]` 宏、`JsValue` 类型系统、闭包/字符串 ABI，以及 `wasm-bindgen` CLI 生成 JS 胶水 |
+| [js-sys](https://docs.rs/js-sys/latest/js_sys/) | JS 语言层 | 绑定 ECMAScript 标准全局对象（`Array`、`Promise`、`JSON` 等），**不含** Web/Node 专有 API |
+| [web-sys](https://docs.rs/web-sys/latest/web_sys/) | 浏览器 API 层 | 由 WebIDL 自动生成，绑定 DOM、`fetch`、Canvas、WebGL 等浏览器 API；依赖 js-sys |
+| [wasm-bindgen-futures](https://docs.rs/wasm-bindgen-futures/latest/wasm_bindgen_futures/) | 异步桥接层 | 在 Rust `Future` 与 JS `Promise` 之间转换；实现已迁入 `js_sys::futures`，本 crate 为兼容 re-export |
+
+**依赖关系**：`web-sys` → `js-sys` → `wasm-bindgen`；`wasm-bindgen-futures` → `js-sys`（`futures` 子模块）。
+
+---
+
+### 6.1 wasm-bindgen
+
+文档：[docs.rs/wasm-bindgen](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/index.html)
+
+`wasm-bindgen` 是整个生态的**根基**：编译期由 `#[wasm_bindgen]` 宏改写代码，运行期提供 `JsValue` 等类型，构建期由 CLI 生成 JS 胶水。
+
+#### 模块
+
+| 模块 | 说明 | 示例 |
+|------|------|------|
+| [`prelude`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/prelude/index.html) | 常用 glob 导入 | `use wasm_bindgen::prelude::*;` |
+| [`closure`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/closure/index.html) | 将 Rust 闭包传给 JS | `Closure::wrap(Box::new(\|v\| { ... }))` |
+| [`convert`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/convert/index.html) | 类型转换（不稳定） | 一般通过 `From`/`Into` 隐式转换 |
+| [`sys`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/sys/index.html) | js-sys 类型的 re-export | 内部使用，应用层直接用 js-sys |
+
+#### 结构体
+
+| 结构体 | 说明 | 示例 |
+|--------|------|------|
+| [`JsValue`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/struct.JsValue.html) | 任意 JS 值的 Rust 侧表示 | `JsValue::from(42)`、`val.as_string()` |
+| [`JsError`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/struct.JsError.html) | 导出函数返回 `Result<T, JsError>` 时向 JS 抛 Error | `Err(JsError::new("bad input"))` |
+| [`Clamped`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/struct.Clamped.html) | 绑定 `Uint8ClampedArray` | `Clamped(&[255u8, 0, 128])` 传给 Canvas |
+| [`Parent`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/struct.Parent.html) | `#[wasm_bindgen(extends = Parent)]` 的父类字段 | 继承 JS 类时使用 |
+
+#### Trait
+
+| Trait | 说明 | 示例 |
+|-------|------|------|
+| [`JsCast`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/trait.JsCast.html) | JS 类型间动态转换 | `js_val.dyn_into::<web_sys::Element>()?` |
+| [`UnwrapThrowExt`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/trait.UnwrapThrowExt.html) | `Option`/`Result` 失败时抛 JS 异常 | `some_option.unwrap_throw()` |
+
+#### 函数
+
+| 函数 | 说明 | 示例 |
+|------|------|------|
+| [`throw_str`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/fn.throw_str.html) | 抛出 JS 字符串异常 | `throw_str("something went wrong");` |
+| [`throw_val`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/fn.throw_val.html) | 重新抛出 JS 异常 | 在 `catch` 块中 `throw_val(e)` |
+| [`memory`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/fn.memory.html) | 获取 Wasm 线性内存句柄 | `memory().buffer()` |
+| [`instance`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/fn.instance.html) | 获取 `WebAssembly.Instance` | 仅 `--target web` 等目标可用 |
+| [`intern`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/fn.intern.html) / [`unintern`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/fn.unintern.html) | 字符串 intern 缓存 | 高频传字符串到 JS 时加速 |
+
+#### 宏
+
+| 宏 | 说明 | 示例 |
+|----|------|------|
+| `#[wasm_bindgen]` | 导出/导入 Rust 函数、结构体、JS 函数 | 见下方完整示例 |
+| [`link_to!`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/macro.link_to.html) | 链接 JS 模块并返回运行时 URL | `link_to!("./helper.js")` |
+
+`wasm-pack-demo` 中的典型用法——导出 Rust 函数、导入 JS 全局 `alert`：
+
+```rust
+use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen]
+extern "C" {
+    fn alert(s: &str);          // 导入 JS 侧函数
+}
+
+#[wasm_bindgen]
+pub fn greet() {                 // 导出给 JS 调用
+    alert("Hello, wasm-pack-demo!");
+}
+```
+
+---
+
+### 6.2 js-sys
+
+文档：[docs.rs/js-sys](https://docs.rs/js-sys/latest/js_sys/index.html)
+
+[js-sys](https://docs.rs/js-sys/latest/js_sys/) 绑定 **ECMAScript 标准**中的全局对象，与运行环境无关（浏览器、Node、Deno 均适用）。方法名遵循 Rust `snake_case` 惯例（如 JS 的 `decodeURI` → `decode_uri`）。
+
+#### 模块
+
+| 模块 | 对应 JS | 示例 |
+|------|---------|------|
+| [`JSON`](https://docs.rs/js-sys/latest/js_sys/JSON/index.html) | `JSON.parse` / `JSON.stringify` | `JSON::parse(&JsValue::from(r#"{"a":1}"#))?` |
+| [`Math`](https://docs.rs/js-sys/latest/js_sys/Math/index.html) | `Math.random()` 等 | `Math::random()` |
+| [`Reflect`](https://docs.rs/js-sys/latest/js_sys/Reflect/index.html) | `Reflect.get` / `Reflect.set` | `Reflect::get(obj, &key)?` |
+| [`Atomics`](https://docs.rs/js-sys/latest/js_sys/Atomics/index.html) | `Atomics` + `SharedArrayBuffer` | 多线程 Wasm 场景 |
+| [`WebAssembly`](https://docs.rs/js-sys/latest/js_sys/WebAssembly/index.html) | JS 侧 `WebAssembly` 命名空间 | 动态加载 Wasm 模块 |
+| [`futures`](https://docs.rs/js-sys/latest/js_sys/futures/index.html) | Promise ↔ Future 桥接 | 见 6.4 节；也可 `promise.await` |
+
+#### 常用结构体（按类别）
+
+| 类别 | 结构体 | 对应 JS | 示例 |
+|------|--------|---------|------|
+| 基础类型 | `Object`, `Array`, `Function` | 对象、数组、函数 | `Array::new()` + `arr.push(&JsValue::from(1))` |
+| 集合 | `Map`, `Set`, `WeakMap`, `WeakSet` | ES6 集合 | `Map::new()` + `map.set(&key, &val)` |
+| 异步 | `Promise`, `AsyncGenerator` | Promise、async 生成器 | `Promise::resolve(&JsValue::from(42))` |
+| 二进制 | `ArrayBuffer`, `Uint8Array`, `DataView` | TypedArray 家族 | `Uint8Array::new(&buffer)` |
+| 错误 | `Error`, `TypeError`, `RangeError` | 内置 Error 类型 | `Error::new("msg")` |
+| 特殊值 | `Null`, `Undefined` | `null` / `undefined` | `JsValue::NULL`、`JsValue::UNDEFINED` |
+| 字符串 | `JsString` | JS 字符串对象 | `JsString::from("hello")` |
+| 其他 | `Date`, `RegExp`, `Symbol`, `BigInt` | 日期、正则、Symbol | `Date::new_0().get_time()` |
+
+#### 全局函数
+
+| 函数 | 对应 JS | 示例 |
+|------|---------|------|
+| [`global`](https://docs.rs/js-sys/latest/js_sys/fn.global.html) | 全局对象 | `global().dyn_into::<js_sys::Object>()` |
+| [`parse_int`](https://docs.rs/js-sys/latest/js_sys/fn.parse_int.html) | `parseInt()` | `parse_int("42", 10)` |
+| [`parse_float`](https://docs.rs/js-sys/latest/js_sys/fn.parse_float.html) | `parseFloat()` | `parse_float("3.14")` |
+| [`encode_uri`](https://docs.rs/js-sys/latest/js_sys/fn.encode_uri.html) | `encodeURI()` | URL 编码 |
+| [`try_iter`](https://docs.rs/js-sys/latest/js_sys/fn.try_iter.html) | `Symbol.iterator` 协议 | 遍历 JS 可迭代对象 |
+
+#### Trait（节选）
+
+| Trait | 说明 | 示例 |
+|-------|------|------|
+| [`Iterable`](https://docs.rs/js-sys/latest/js_sys/trait.Iterable.html) | 实现 `Symbol.iterator` 的类型 | `for item in array.iter()` |
+| [`TypedArray`](https://docs.rs/js-sys/latest/js_sys/trait.TypedArray.html) | 所有 TypedArray 的公共接口 | `arr.length()` |
+| [`Promising`](https://docs.rs/js-sys/latest/js_sys/trait.Promising.html) | 可 `.await` 的 Promise 类型 | `some_promise.await`（需 async 上下文） |
+
+完整示例——在 Rust 中构造 JS 数组并序列化为 JSON：
 
 ```rust
 use js_sys::{Array, Object, JSON};
+use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 pub fn create_array() -> JsValue {
     let arr = Array::new();
     arr.push(&JsValue::from(1));
     arr.push(&JsValue::from(2));
-    arr.into()
+
+    let obj = Object::new();
+    js_sys::Reflect::set(&obj, &"items".into(), &arr).unwrap();
+    JSON::stringify(&obj).unwrap()
 }
 ```
 
-### 6.2 web-sys：绑定 Web API
+---
 
-[web-sys](https://docs.rs/web-sys/) 提供对浏览器 Web API 的绑定。**必须** 在 `Cargo.toml` 中按需启用 feature，否则 crate 体积会爆炸：
+### 6.3 web-sys
+
+文档：[docs.rs/web-sys](https://docs.rs/web-sys/latest/web_sys/index.html)
+
+[web-sys](https://docs.rs/web-sys/latest/web_sys/) 由浏览器 WebIDL **自动生成**，涵盖 DOM、网络、Canvas、WebGL、Web Audio 等全部 Web API。默认编译几乎为空——**每个类型对应一个 Cargo feature**，必须按需启用：
 
 ```toml
 [dependencies]
@@ -1568,15 +1710,51 @@ web-sys = { version = "0.3", features = [
 ] }
 ```
 
-常用 API 示例：
+#### 模块
+
+| 模块 | 说明 | 示例 |
+|------|------|------|
+| [`console`](https://docs.rs/web-sys/latest/web_sys/console/index.html) | 浏览器控制台 | `console::log_1(&"hello".into())` |
+| [`css`](https://docs.rs/web-sys/latest/web_sys/css/index.html) | CSS 相关常量 | 配合 `element.style()` 使用 |
+| `gpu_*` | WebGPU 常量模块 | 需 `--cfg=web_sys_unstable_apis` |
+
+#### 常用结构体（按领域，完整列表见 [Cargo.toml features](https://github.com/rustwasm/wasm-bindgen/tree/main/crates/web-sys)）
+
+| 领域 | 代表类型 | 说明 | 示例 |
+|------|----------|------|------|
+| DOM | `Document`, `Element`, `Node`, `HtmlElement` | 文档树操作 | `doc.create_element("p")?` |
+| 窗口 | `Window`, `Location`, `History` | 浏览器窗口 | `web_sys::window().unwrap()` |
+| 事件 | `Event`, `MouseEvent`, `KeyboardEvent` | 事件对象 | `event.target()` |
+| 网络 | `Request`, `Response`, `Headers`, `RequestInit` | Fetch API | `Request::new_with_str(&url)?` |
+| Canvas | `HtmlCanvasElement`, `CanvasRenderingContext2d` | 2D 绘图 | `canvas.get_context("2d")?` |
+| 存储 | `Storage`, `IdbFactory` | localStorage / IndexedDB | 需对应 feature |
+| 媒体 | `HtmlVideoElement`, `MediaStream` | 音视频 | 需对应 feature |
+| WebGL | `WebGlRenderingContext`, `WebGl2RenderingContext` | 3D 渲染 | 需对应 feature |
+
+#### 枚举（节选）
+
+| 枚举 | 用途 | 示例 |
+|------|------|------|
+| `RequestMode` | Fetch 模式（Cors、No-cors 等） | `opts.set_mode(RequestMode::Cors)` |
+| `ScrollBehavior` | 滚动行为 | `element.scroll_into_view_with_scroll_into_view_options(...)` |
+| `VisibilityState` | 页面可见性 | `document.visibility_state()` |
+
+#### 函数
+
+| 函数 | 说明 | 示例 |
+|------|------|------|
+| [`window`](https://docs.rs/web-sys/latest/web_sys/fn.window.html) | 获取全局 `Window` | `web_sys::window().ok_or("no window")?` |
+
+完整示例——DOM 操作与控制台输出：
 
 ```rust
 use wasm_bindgen::prelude::*;
-use web_sys::{console, window, document};
+use web_sys::{console, window};
 
 #[wasm_bindgen]
 pub fn manipulate_dom() -> Result<(), JsValue> {
-    let doc = document().ok_or("no document")?;
+    let win = window().ok_or("no window")?;
+    let doc = win.document().ok_or("no document")?;
     let body = doc.body().ok_or("no body")?;
 
     let p = doc.create_element("p")?;
@@ -1588,9 +1766,35 @@ pub fn manipulate_dom() -> Result<(), JsValue> {
 }
 ```
 
-### 6.3 wasm-bindgen-futures：异步互操作
+---
 
-浏览器中大量 API 是异步的（`fetch`、IndexedDB 等）。`wasm-bindgen-futures` 让你能在 Rust 中 `.await` JS 的 `Promise`：
+### 6.4 wasm-bindgen-futures
+
+文档：[docs.rs/wasm-bindgen-futures](https://docs.rs/wasm-bindgen-futures/latest/wasm_bindgen_futures/index.html)
+
+[wasm-bindgen-futures](https://docs.rs/wasm-bindgen-futures/latest/wasm_bindgen_futures/) 解决 Rust `async`/`.await` 与 JS `Promise` 的互操作。自较新版本起，**核心实现已迁入 `js_sys::futures`**，本 crate 仅 re-export 以保持向后兼容；也可直接使用 `js_sys::Promise` 的 `.await`。
+
+#### 结构体
+
+| 结构体 | 说明 | 示例 |
+|--------|------|------|
+| [`JsFuture`](https://docs.rs/wasm-bindgen-futures/latest/wasm_bindgen_futures/struct.JsFuture.html) | 将 JS `Promise` 包装为 Rust `Future` | `JsFuture::from(promise).await?` |
+
+#### 函数
+
+| 函数 | 说明 | 示例 |
+|------|------|------|
+| [`spawn_local`](https://docs.rs/wasm-bindgen-futures/latest/wasm_bindgen_futures/fn.spawn_local.html) | 在当前线程调度 Rust Future | `spawn_local(async { ... })` |
+| [`future_to_promise`](https://docs.rs/wasm-bindgen-futures/latest/wasm_bindgen_futures/fn.future_to_promise.html) | Rust `Future` → JS `Promise` | 见下方反向示例 |
+| [`future_to_promise_typed`](https://docs.rs/wasm-bindgen-futures/latest/wasm_bindgen_futures/fn.future_to_promise_typed.html) | 带泛型类型的 Promise | `future_to_promise_typed::<i32>(async { Ok(42) })` |
+
+#### 模块
+
+| 模块 | 说明 | 示例 |
+|------|------|------|
+| [`stream`](https://docs.rs/wasm-bindgen-futures/latest/wasm_bindgen_futures/stream/index.html) | JS `AsyncIterator` → Rust `Stream` | 处理 ReadableStream 等 |
+
+**Rust `.await` JS Promise**（配合 web-sys 的 `fetch`）：
 
 ```rust
 use wasm_bindgen::prelude::*;
@@ -1614,7 +1818,7 @@ pub async fn fetch_url(url: String) -> Result<String, JsValue> {
 }
 ```
 
-反向方向——将 Rust `Future` 暴露给 JS 为 `Promise`：
+**Rust `Future` → JS `Promise`**（导出给 JS 侧 `await`）：
 
 ```rust
 use wasm_bindgen::prelude::*;
@@ -1623,21 +1827,22 @@ use wasm_bindgen_futures::future_to_promise;
 #[wasm_bindgen]
 pub fn async_computation(n: u32) -> js_sys::Promise {
     future_to_promise(async move {
-        // 模拟耗时计算
         let result = fibonacci(n);
         Ok(JsValue::from(result))
     })
 }
 ```
 
-JS 侧：
+JS 侧调用：
 
 ```javascript
 const result = await async_computation(20);
 console.log(result); // 6765
 ```
 
-### 6.7 字符串传递原理
+---
+
+### 6.5 字符串传递原理
 
 字符串是 Wasm/JS 互操作中最复杂的类型。wasm-bindgen 的处理流程：
 
@@ -1658,7 +1863,7 @@ JS 字符串 (UTF-16)
 
 这也是为什么需要 wasm-bindgen 的 JS 胶水代码——裸 Wasm 只认识 `i32`/`f64`，不认识字符串。
 
-### 6.8 在 Vite 项目中完整集成
+### 6.6 在 Vite 项目中完整集成
 
 ```bash
 # 1. 在 Rust 项目中构建
@@ -1697,13 +1902,13 @@ export default {
 };
 ```
 
-### 6.9 常用辅助 crate
+### 6.7 常用辅助 crate
 
 | Crate | 作用 |
 |-------|------|
 | `console_error_panic_hook` | 将 Rust panic 信息打印到 `console.error` |
 | `wee_alloc` | 轻量级 Wasm 分配器 |
-| `serde-wasm-bindgen` | Serde 序列化/反序列化 JsValue |
+| `serde-wasm-bindgen` | Serde 序列化/反序列化 JsValue，以代替内置的 JSValue.from_serde,JSValue.into_serde |
 | `gloo` | 高层 Web API 封装（定时器、事件、网络等） |
 | `wasm-bindgen-test` | Wasm 环境下的单元测试 |
 
@@ -1715,7 +1920,7 @@ pub fn main() {
 }
 ```
 
-### 6.10 TypeScript 类型生成
+### 6.8 TypeScript 类型生成
 
 `wasm-pack build` 会自动生成 `my_wasm.d.ts`：
 

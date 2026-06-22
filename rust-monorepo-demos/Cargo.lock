@@ -386,6 +386,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasm-pack-interaction-demo"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "wasm-bindgen",
+ "wasm-bindgen-test",
+]
+
+[[package]]
 name = "winapi-util"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
