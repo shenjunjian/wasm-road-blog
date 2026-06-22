@@ -1,0 +1,194 @@
+<html lang="zh-CN"><head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>生命游戏</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+  
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: #f5f5f5;
+        color: #222;
+      }
+  
+      h1 {
+        margin: 0;
+        font-size: 1.5rem;
+        font-weight: 600;
+      }
+  
+      .hint {
+        margin: 0;
+        font-size: 0.875rem;
+        color: #666;
+      }
+  
+      .controls {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+  
+      button {
+        padding: 8px 16px;
+        font-size: 0.875rem;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        background: #fff;
+        cursor: pointer;
+      }
+  
+      button:hover {
+        background: #eee;
+      }
+  
+      button:active {
+        background: #ddd;
+      }
+  
+      #generation {
+        font-size: 0.875rem;
+        color: #444;
+        min-width: 6em;
+      }
+  
+      #board {
+        border: 1px solid #999;
+        cursor: crosshair;
+        background: #fff;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>生命游戏</h1>
+    <p class="hint">点击格子标记活细胞（黑色），再点「下一步」推进一代</p>
+  
+    <canvas id="board" width="300" height="300"></canvas>
+  
+    <div class="controls">
+      <button id="nextBtn" type="button">下一步</button>
+      <button id="clearBtn" type="button">清空</button>
+      <span id="generation">第 0 代</span>
+    </div>
+  
+    <script>
+      const SIZE = 40;
+      const CELL = 15;
+  
+      const canvas = document.getElementById("board");
+      const ctx = canvas.getContext("2d");
+      const nextBtn = document.getElementById("nextBtn");
+      const clearBtn = document.getElementById("clearBtn");
+      const generationEl = document.getElementById("generation");
+  
+      let grid = createEmptyGrid();
+      let generation = 0;
+  
+      function createEmptyGrid() {
+        return Array.from({ length: SIZE }, () => Array(SIZE).fill(false));
+      }
+  
+      function countNeighbors(x, y) {
+        let count = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx >= 0 && nx < SIZE && ny >= 0 && ny < SIZE && grid[ny][nx]) {
+              count++;
+            }
+          }
+        }
+        return count;
+      }
+  
+      function nextGeneration() {
+        const next = createEmptyGrid();
+        for (let y = 0; y < SIZE; y++) {
+          for (let x = 0; x < SIZE; x++) {
+            const neighbors = countNeighbors(x, y);
+            const alive = grid[y][x];
+            if (alive) {
+              next[y][x] = neighbors === 2 || neighbors === 3;
+            } else {
+              next[y][x] = neighbors === 3;
+            }
+          }
+        }
+        grid = next;
+        generation++;
+        draw();
+        updateGenerationLabel();
+      }
+  
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+        for (let y = 0; y < SIZE; y++) {
+          for (let x = 0; x < SIZE; x++) {
+            if (grid[y][x]) {
+              ctx.fillStyle = "#000";
+              ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+            }
+          }
+        }
+  
+        ctx.strokeStyle = "#ccc";
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= SIZE; i++) {
+          const pos = i * CELL + 0.5;
+          ctx.beginPath();
+          ctx.moveTo(pos, 0);
+          ctx.lineTo(pos, SIZE * CELL);
+          ctx.stroke();
+  
+          ctx.beginPath();
+          ctx.moveTo(0, pos);
+          ctx.lineTo(SIZE * CELL, pos);
+          ctx.stroke();
+        }
+      }
+  
+      function toggleCell(clientX, clientY) {
+        const rect = canvas.getBoundingClientRect();
+        const x = Math.floor((clientX - rect.left) / CELL);
+        const y = Math.floor((clientY - rect.top) / CELL);
+        if (x >= 0 && x < SIZE && y >= 0 && y < SIZE) {
+          grid[y][x] = !grid[y][x];
+          draw();
+        }
+      }
+  
+      function clearBoard() {
+        grid = createEmptyGrid();
+        generation = 0;
+        draw();
+        updateGenerationLabel();
+      }
+  
+      function updateGenerationLabel() {
+        generationEl.textContent = `第 ${generation} 代`;
+      }
+  
+      canvas.addEventListener("click", (event) => {
+        toggleCell(event.clientX, event.clientY);
+      });
+  
+      nextBtn.addEventListener("click", nextGeneration);
+      clearBtn.addEventListener("click", clearBoard);
+  
+      draw();
+    </script>
+  
+  
+  </body></html>
