@@ -904,7 +904,7 @@ const bytes = new Uint8Array(memory.buffer, ptr, len);
 const jsString = new TextDecoder('utf-8').decode(bytes);
 console.log(jsString);
 ```
-   有关string的提案有很多，大都夭折了，目前可以关注 3.2 节的`JS String Builtins（chrome 130+)`,通过 import 调用宿主 JS 字符串 API。 另外实际开发时，不需要关注这个，大多数开发语言会处理字符串的问题，`wasm-bindgen` 参见 6.5 节。
+   有关string的提案有很多，大都夭折了，目前可以关注 3.2 节的`JS String Builtins（chrome 130+)`,通过 import 调用宿主 JS 字符串 API。 另外实际开发时，不需要关注这个，大多数开发语言会处理字符串的问题，`wasm-bindgen` 参见 6.6 节。
 
 
 ### 3.4 内存模型深入
@@ -1818,7 +1818,7 @@ Rust 编译 Wasm 的核心是 `wasm32-unknown-unknown` + `cdylib` + `wasm-pack`�
 
 下面我们将以更复杂的例子`wasm-pack-interaction-demo`，来演示`rust侧` 与 `JS 侧`的互操作。
 
-### 生态关系概览
+### 6.1 生态关系概览
 
 这四个 crate 构成 Rust/Wasm 与 JavaScript 互操作的完整栈，层次由底向上依次叠加：
 
@@ -1853,7 +1853,7 @@ graph TB
 
 ---
 
-### 6.1 wasm-bindgen
+### 6.2 wasm-bindgen
 
 文档：[docs.rs/wasm-bindgen](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/index.html)
 
@@ -1898,8 +1898,31 @@ graph TB
 
 | 宏 | 说明 | 示例 |
 |----|------|------|
-| `#[wasm_bindgen]` | 导出/导入 Rust 函数、结构体、JS 函数 | 见下方完整示例 |
+| `#[wasm_bindgen]` | 导出/导入 Rust 函数、结构体、JS 函数；支持 `start`、`js_namespace` 等属性 | 见下方详解 |
 | [`link_to!`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/macro.link_to.html) | 链接 JS 模块并返回运行时 URL | `link_to!("./helper.js")` |
+
+`#[wasm_bindgen]` 是整个绑定层的**入口宏**：加在 Rust 函数/结构体上表示**导出给 JS**；加在 `extern "C" { ... }` 块及其成员上表示**从 JS 导入**。除默认行为外，宏还支持大量**属性参数**（可组合），用于控制 JS 侧命名、类语义、初始化时机等。完整列表见 [官方属性参考](https://wasm-bindgen.github.io/wasm-bindgen/reference/attributes/index.html)。
+
+##### 属性一览
+
+| 属性 | 作用对象 | 说明 |
+|------|----------|------|
+| [`start`](https://wasm-bindgen.github.io/wasm-bindgen/reference/attributes/on-rust-exports/start.html) | 导出函数 | Wasm 模块实例化后**自动执行**；可写多个，顺序不保证 |
+| `start, private` | 导出函数 | 仅注册为 start，**不导出**给 JS 调用 |
+| [`js_namespace`](https://wasm-bindgen.github.io/wasm-bindgen/reference/attributes/on-rust-exports/js_namespace.html) | 导出/导入 | 将符号挂到 JS 命名空间对象下，避免污染全局 |
+| [`js_name`](https://wasm-bindgen.github.io/wasm-bindgen/reference/attributes/on-rust-exports/js_name.html) | 导出/导入 | 在 JS 侧使用与 Rust 不同的名字（函数、类型、参数） |
+| [`js_class`](https://wasm-bindgen.github.io/wasm-bindgen/reference/attributes/on-rust-exports/js_class.html) | `impl` 块 | 将方法挂到指定 JS 类（常与 `js_name` 配合） |
+| [`constructor`](https://wasm-bindgen.github.io/wasm-bindgen/reference/attributes/on-rust-exports/constructor.html) | 导出方法 | 标记为 JS 类构造函数，支持 `new Foo()` |
+| [`getter` / `setter`](https://wasm-bindgen.github.io/wasm-bindgen/reference/attributes/on-rust-exports/getter-and-setter.html) | 导出方法 | 生成 JS 属性访问器；非 `Copy` 字段可用 `getter_with_clone` |
+| [`extends`](https://wasm-bindgen.github.io/wasm-bindgen/reference/attributes/on-rust-exports/extends.html) | 导出结构体 | Rust 导出类继承另一个导出类，生成真实 JS 原型链 |
+| [`skip`](https://wasm-bindgen.github.io/wasm-bindgen/reference/attributes/on-rust-exports/skip.html) | 导出字段 | 该字段不暴露给 JS（无 getter/setter） |
+| [`inspectable`](https://wasm-bindgen.github.io/wasm-bindgen/reference/attributes/on-rust-exports/inspectable.html) | 导出结构体 | 自动生成 `toJSON` / `toString`，便于调试 |
+| [`method`](https://wasm-bindgen.github.io/wasm-bindgen/reference/attributes/on-js-imports/method.html) | 导入函数 | 绑定 JS 实例方法（首参为 `this: &T`） |
+| `structural` | 导入类型 | 按结构匹配 JS 对象，而非 `instanceof` |
+
+**命名空间 struct 的注意点**：`impl` 块是**独立的宏展开**，无法读取 struct 上的 `js_namespace` / `js_name`，因此 `impl` 上必须**重复声明**相同命名空间（及 `js_class`），否则编译会报错并提示应补的属性。
+
+##### 基本用法：导出函数与导入 JS 全局
 
 `wasm-pack-demo` 中的典型用法——导出 Rust 函数、导入 JS 全局 `alert`：
 
@@ -1917,9 +1940,149 @@ pub fn greet() {                 // 导出给 JS 调用
 }
 ```
 
+##### `start`：实例化时自动执行
+
+`#[wasm_bindgen(start)]` 会在 Wasm **加载/实例化完成后**自动调用，常用于安装 panic hook、初始化全局状态。约束：无参数，返回 `()` 或 `Result<(), JsValue>`；`wasm-bindgen-test` 环境下**不会**执行。
+
+```rust
+#[wasm_bindgen(start)]
+pub fn main() {
+    console_error_panic_hook::set_once();
+}
+
+// 仅初始化、不暴露给 JS：
+#[wasm_bindgen(start, private)]
+fn init_internal() { /* ... */ }
+```
+
+同一 crate（及依赖）内可声明多个 `start` 函数，它们会被链接成链**全部执行**，但**顺序未定义**，彼此不应有依赖。
+
+##### `js_namespace`：命名空间与嵌套路径
+
+**导出侧**：把函数/类放进命名空间对象，而不是挂在模块顶层：
+
+```rust
+#[wasm_bindgen(js_namespace = math)]
+pub fn add(a: i32, b: i32) -> i32 { a + b }
+// JS: import { math } from './pkg'; math.add(1, 2)
+```
+
+**导入侧**：声明 JS 上位于某命名空间下的 API；支持**嵌套路径**（数组形式）：
+
+```rust
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console)]
+    fn log(s: &str);                              // console.log
+
+    #[wasm_bindgen(js_namespace = ["window", "document"])]
+    fn write(s: &str);                            // window.document.write
+
+    #[wasm_bindgen(js_namespace = ["table"], js_name = get)]
+    fn table_get(idx: u32) -> js_sys::Function;   // table.get(i)
+}
+
+// 块内所有项同一命名空间时，可提到 extern 块上：
+#[wasm_bindgen(js_namespace = Math)]
+extern "C" {
+    #[wasm_bindgen] fn random() -> f64;
+    #[wasm_bindgen] fn log(a: f64) -> f64;
+}
+```
+
+`js_namespace = "default"` 可将导出作为**默认导出对象**（见官方 [js_namespace](https://wasm-bindgen.github.io/wasm-bindgen/reference/attributes/on-rust-exports/js_namespace.html) 文档）。
+
+##### `js_name` / `js_class`：重命名与参数名
+
+默认 Rust 的 `snake_case` 会映射为 JS 的 `camelCase`；需要精确控制时使用 `js_name`：
+
+```rust
+#[wasm_bindgen(js_name = greetUser)]
+pub fn greet_user(name: &str) -> String {
+    format!("Hello, {name}")
+}
+
+// 仅改 JS 侧参数名（Rust 侧仍为 snake_case）：
+#[wasm_bindgen]
+pub fn create_user(#[wasm_bindgen(js_name = userName)] user_name: &str) -> String {
+    user_name.to_string()
+}
+
+// 类型在 JS 侧叫 Counter，Rust 侧仍叫 RustCounter：
+#[wasm_bindgen(js_name = Counter)]
+pub struct RustCounter { value: i32 }
+
+#[wasm_bindgen(js_class = Counter)]   // impl 必须显式指定 js_class
+impl RustCounter { /* ... */ }
+```
+
+还支持 Well-known Symbol，例如 `js_name = "[Symbol.toPrimitive]"`、`getter = "[Symbol.toStringTag]"`。
+
+##### 导出 Rust 类：`constructor`、`getter`、`setter`
+
+导出带状态的 Rust 类型时，wasm-bindgen 会生成 ES 类。`constructor` 对应 `new`；公开字段默认生成 getter/setter，也可用显式方法控制：
+
+```rust
+#[wasm_bindgen]
+pub struct Counter {
+    value: i32,
+}
+
+#[wasm_bindgen]
+impl Counter {
+    #[wasm_bindgen(constructor)]
+    pub fn new(start: i32) -> Counter {
+        Counter { value: start }
+    }
+
+    pub fn increment(&mut self) -> i32 {
+        self.value += 1;
+        self.value
+    }
+
+    pub fn get(&self) -> i32 {
+        self.value
+    }
+
+    // 显式属性访问器（JS 侧 counter.value / counter.value = 10）：
+    #[wasm_bindgen(getter)]
+    pub fn value(&self) -> i32 { self.value }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_value(&mut self, v: i32) { self.value = v; }
+}
+```
+
+JS 侧：`const c = new Counter(0); c.increment(); c.get();`
+
+##### `extends`：导出类继承
+
+`extends = Parent` 在 JS 侧生成 `class Child extends Parent`，`instanceof` 行为正确。子 struct 会注入隐藏的 `parent: Parent<ParentType>` 字段，在 Rust 中通过 `self.parent.borrow()` 访问父类数据（详见上文 [`Parent`](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/struct.Parent.html) 结构体说明）。
+
+##### 导入 JS 实例方法：`method`
+
+对 `extern "C"` 中声明的 JS 类型，用 `method` 绑定原型方法：
+
+```rust
+#[wasm_bindgen]
+extern "C" {
+    type Set;
+
+    #[wasm_bindgen(method)]
+    fn has(this: &Set, element: &JsValue) -> bool;
+}
+// Rust: set.has(&elem)  →  JS: set.has(elem)
+```
+
+##### 其它常用属性
+
+- **`skip`**：标记导出 struct 的字段，不在 JS 类上生成 accessor（内部状态）。
+- **`inspectable`**：为导出类生成 `toJSON`/`toString`，`JSON.stringify(obj)` 时可见公开字段。
+- **错误与异步**：导出函数返回 `Result<T, JsValue>` 或 `Result<T, JsError>` 会在 JS 侧抛异常；`async fn` 导出会自动变为返回 `Promise` 的函数（见 6.4 节 `fetch_url` 示例）。
+
 ---
 
-### 6.2 js-sys
+### 6.3 js-sys
 
 文档：[docs.rs/js-sys](https://docs.rs/js-sys/latest/js_sys/index.html)
 
@@ -1987,7 +2150,7 @@ pub fn create_array() -> JsValue {
 
 ---
 
-### 6.3 web-sys
+### 6.4 web-sys
 
 文档：[docs.rs/web-sys](https://docs.rs/web-sys/latest/web_sys/index.html)
 
@@ -2066,7 +2229,7 @@ pub fn manipulate_dom() -> Result<(), JsValue> {
 
 ---
 
-### 6.4 wasm-bindgen-futures
+### 6.5 wasm-bindgen-futures
 
 文档：[docs.rs/wasm-bindgen-futures](https://docs.rs/wasm-bindgen-futures/latest/wasm_bindgen_futures/index.html)
 
@@ -2140,7 +2303,7 @@ console.log(result); // 6765
 
 ---
 
-### 6.5 字符串传递原理
+### 6.6 字符串传递原理
 
 字符串是 Wasm/JS 互操作中最复杂的类型。wasm-bindgen 的处理流程：
 
@@ -2161,46 +2324,165 @@ JS 字符串 (UTF-16)
 
 这也是为什么需要 wasm-bindgen 的 JS 胶水代码——裸 Wasm 只认识 `i32`/`f64`，不认识字符串。
 
-### 6.6 在 Vite 项目中完整集成
+### 6.7 在 Vite 项目中完整集成
+
+本节用仓库里的两个配套工程，把「Rust 编译 → `pkg/` 产物 → Vite 页面引用」串成完整链路。重点对比 `wasm-pack build --target web` 与 `--target bundler` 的产物差异，以及 JS 侧引入方式的不同。
+
+#### 示例工程概览
+
+| 工程 | 路径 | 角色 |
+|------|------|------|
+| **`wasm-pack-interaction-demo`** | `rust-monorepo-demos/crates/wasm-pack-interaction-demo/` | Rust 侧 Wasm 库，`wasm-pack build` 产出 `pkg/` |
+| **`wasm-pack-interactive-demo-page`** | `wasm-road-demo/apps/wasm-pack-interactive-demo-page/` | Vite 前端演示页，通过 `file:` 依赖引用上述 `pkg/` |
+
+**Rust 库 `wasm-pack-interaction-demo`** 在 6.2–6.5 各节概念之上做了可运行的互操作演示，源码按方向拆成两个模块：
+
+| 模块 | 文件 | 方向 | 演示内容 |
+|------|------|------|----------|
+| Rust → JS | `src/rust-vars.rs` | 导出给 JS 调用 | 基本 `JsValue`、`web-sys` DOM、`fetch`、`serde-wasm-bindgen` 往返、`js-sys` Promise、`tiny-skia` 绘制 PNG buffer |
+| JS → Rust | `src/js-vars.rs` | JS 传入 Rust 使用 | 接收 JS 对象/函数/Promise、`SharedArrayBuffer` 求和、通过 JS 回调的 `setTimeout` / `fetch` |
+
+**前端页 `wasm-pack-interactive-demo-page`** 把上述导出函数接到页面上：`rust-vars-demo.ts` 展示 Rust 导出，`js-vars-demo.ts` 构造 JS 值传入 Rust。`package.json` 在 `predev` / `prebuild` 时自动编译 Wasm，并通过本地路径依赖引入：
+
+```json
+{
+  "scripts": {
+    "wasm:build": "cd ../../../rust-monorepo-demos/crates/wasm-pack-interaction-demo && wasm-pack build --dev --target web --out-dir pkg"
+  },
+  "dependencies": {
+    "wasm-pack-interaction-demo": "file:../../../rust-monorepo-demos/crates/wasm-pack-interaction-demo/pkg"
+  }
+}
+```
+
+本地开发时，在 `wasm-road-demo` 根目录执行 `pnpm dev`（或进入该 app 目录执行 `vp dev`）即可同时启动 Vite 并触发 Wasm 构建。
+
+#### `--target web` 与 `--target bundler`：产物对比
+
+两者编译出的 `_bg.wasm` 二进制相同，差异在 **wasm-bindgen 生成的 JS 胶水代码及其加载方式**。
 
 ```bash
-# 1. 在 Rust 项目中构建
-wasm-pack build --target bundler --out-dir pkg
+# web：浏览器 fetch 异步加载 wasm，需手动 await init()
+wasm-pack build --dev --target web --out-dir pkg
 
-# 2. 将 pkg 复制或链接到前端项目
+# bundler：假定有 Vite/Webpack/Rollup 处理 .wasm 模块 import
+wasm-pack build --dev --target bundler --out-dir pkg
 ```
 
+| 对比项 | `--target web` | `--target bundler` |
+|--------|----------------|-------------------|
+| **设计假设** | 无打包器，或打包器不参与 wasm 加载 | 打包器识别 `import ... from '.wasm'` |
+| **`pkg/` 文件** | `xxx.js`（单文件，含全部胶水）+ `_bg.wasm` + `.d.ts` | `xxx.js`（薄入口）+ `xxx_bg.js` + `_bg.wasm` + `.d.ts` |
+| **default 导出 `init`** | 有 | **无** |
+| **Wasm 加载时机** | 调用 `await init()` 时，`fetch` + `instantiate` | **import 模块时**由打包器同步/异步完成 |
+| **`.d.ts` 中的 `init`** | 有 `export default function init(...)` | 只有具名导出，无 default `init` |
+| **典型场景** | 纯 HTML `<script type="module">`、需要显式控制初始化时机 | 发布 npm 包给 React/Vue/Vite 项目（wasm-pack 默认 target） |
+
+**web 产物入口**（`pkg/wasm_pack_interaction_demo.js` 末尾）：导出 default 的 `init`，内部用 `import.meta.url` 定位 `_bg.wasm` 并 `fetch` 加载：
+
 ```javascript
-// src/main.js
-import init, { greet, Counter, fetch_url } from '../pkg/my_wasm.js';
-
-async function main() {
-  await init();
-
-  console.log(greet('Vite'));
-
-  const counter = new Counter(0);
-  counter.increment();
-  counter.increment();
-  console.log(counter.get()); // 2
-
-  const html = await fetch_url('https://example.com');
-  console.log(html.slice(0, 100));
+// web target 生成的加载逻辑（节选）
+async function __wbg_init(module_or_path) {
+    if (wasm !== undefined) return wasm;
+    if (module_or_path === undefined) {
+        module_or_path = new URL('wasm_pack_interaction_demo_bg.wasm', import.meta.url);
+    }
+    // fetch → WebAssembly.instantiateStreaming / instantiate
+    return __wbg_finalize_init(instance, module);
 }
-
-main();
+export { initSync, __wbg_init as default };
 ```
 
+**bundler 产物入口**（`pkg/wasm_pack_interaction_demo.js` 全文）：直接 import `.wasm`，模块求值时即完成初始化：
+
 ```javascript
-// vite.config.js
+import * as wasm from "./wasm_pack_interaction_demo_bg.wasm";
+import { __wbg_set_wasm } from "./wasm_pack_interaction_demo_bg.js";
+
+__wbg_set_wasm(wasm);
+wasm.__wbindgen_start();
+export { greet, get_basic_js_values, /* ... */ } from "./wasm_pack_interaction_demo_bg.js";
+```
+
+```mermaid
+flowchart TB
+    subgraph webTarget["--target web"]
+        W1["import init, { fn } from 'pkg'"]
+        W2["await init()"]
+        W3["fetch _bg.wasm via import.meta.url"]
+        W4["调用 fn()"]
+        W1 --> W2 --> W3 --> W4
+    end
+
+    subgraph bundlerTarget["--target bundler"]
+        B1["import { fn } from 'pkg'"]
+        B2["Vite 处理 import '.wasm'"]
+        B3["模块加载时 __wbindgen_start()"]
+        B4["直接调用 fn()"]
+        B1 --> B2 --> B3 --> B4
+    end
+```
+
+#### JS 侧引入方式
+
+**方式 A：`web` + 显式 `init`（演示页当前用法）**
+
+构建命令与 `package.json` 中的 `wasm:build` 一致，使用 `--target web`。JS 必须先 `await init()`，再调用导出函数：
+
+```typescript
+// wasm-road-demo/apps/wasm-pack-interactive-demo-page/src/rust-vars-demo.ts
+import init, {
+  get_basic_js_values,
+  fetch_resource,
+  serde_roundtrip,
+} from "wasm-pack-interaction-demo";
+
+export async function runRustVarsDemo() {
+  await init();                          // ← web target 必须
+  const basic = get_basic_js_values();
+  // ...
+}
+```
+
+Vite 下 web target 同样可用：dev server 会托管 `_bg.wasm`，`init()` 内部的 `fetch` 能正常取到文件。建议在 `vite.config.ts` 中排除预打包，避免 esbuild 错误处理 wasm 胶水：
+
+```javascript
+// vite.config.ts
 export default {
   optimizeDeps: {
-    exclude: ['my-wasm'],  // 避免 Vite 预打包 wasm
+    exclude: ["wasm-pack-interaction-demo"],
   },
 };
 ```
 
-### 6.7 常用辅助 crate
+**方式 B：`bundler` + 无 `init`（Vite 更常见的 npm 包用法）**
+
+改用 `--target bundler` 构建后，入口不再导出 `init`，import 后即可调用：
+
+```typescript
+import {
+  get_basic_js_values,
+  fetch_resource,
+  serde_roundtrip,
+} from "wasm-pack-interaction-demo";
+
+// 无需 await init()
+const basic = get_basic_js_values();
+```
+
+若仍写 `import init, { ... }` 并 `await init()`，会在运行时报错——bundler 产物根本没有 default 导出。
+
+#### 如何选择
+
+| 你的需求 | 推荐 target | JS 写法 |
+|----------|-------------|---------|
+| 纯 HTML 页面、Trunk、或想自己控制 wasm 加载时机 | `web` | `import init, { fn }` → `await init()` → `fn()` |
+| 发布 npm 包给 Vite/Webpack 项目，import 即用 | `bundler` | `import { fn }` → 直接 `fn()` |
+| 演示页与本文示例保持一致 | `web` | 同 `rust-vars-demo.ts` |
+
+两种 target 在 Vite 中都能工作，**关键是构建 target 与 JS 引入写法必须配对**：有 `init` 用 `web`，无 `init` 用 `bundler`。混用（bundler 构建 + `await init()`，或 web 构建却省略 `init()`）是最常见的集成错误。
+
+### 6.8 常用辅助 crate
 
 | Crate | 作用 |
 |-------|------|
@@ -2218,7 +2500,7 @@ pub fn main() {
 }
 ```
 
-### 6.8 TypeScript 类型生成
+### 6.9 TypeScript 类型生成
 
 `wasm-pack build` 会自动生成 `my_wasm.d.ts`：
 
