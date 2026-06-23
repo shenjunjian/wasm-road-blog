@@ -50,6 +50,7 @@ export async function runRustVarsDemo() {
 
   // 1. 基本 JS 值
   const basic = get_basic_js_values() as Record<string, unknown>;
+  console.log("basic====", basic);
   lines.push("【1】基本 JS 值（来自 Rust）");
   for (const [key, val] of Object.entries(basic)) {
     if (val instanceof Promise) {
@@ -77,6 +78,7 @@ export async function runRustVarsDemo() {
 
   // 4. serde-wasm-bindgen
   const serdeResult = serde_roundtrip("Alice", 30) as Record<string, unknown>;
+  console.log("serdeResult====", serdeResult);
   lines.push("【4】serde-wasm-bindgen 往返：");
   lines.push(`  serialized: ${formatJsValue(serdeResult.serialized)}`);
   lines.push(
