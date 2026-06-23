@@ -1,3 +1,5 @@
+#[path = "js-vars.rs"]
+mod js_vars;
 #[path = "rust-vars.rs"]
 mod rust_vars;
 mod utils;

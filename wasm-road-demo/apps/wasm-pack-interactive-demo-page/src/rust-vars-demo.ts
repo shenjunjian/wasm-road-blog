@@ -50,7 +50,7 @@ export async function runRustVarsDemo() {
 
   // 1. 基本 JS 值
   const basic = get_basic_js_values() as Record<string, unknown>;
-  console.log("basic====", basic);
+  console.log("rust var basic====", basic);
   lines.push("【1】基本 JS 值（来自 Rust）");
   for (const [key, val] of Object.entries(basic)) {
     if (val instanceof Promise) {

@@ -278,9 +278,23 @@ code {
   }
 }
 
+.demo-section-title {
+  margin: 48px 0 8px;
+  font-size: 28px;
+  letter-spacing: -0.5px;
+
+  &:first-of-type {
+    margin-top: 0;
+  }
+}
+
 .demo-desc {
   margin-bottom: 32px;
   color: var(--text);
+}
+
+.demo-card-wide {
+  grid-column: 1 / -1;
 }
 
 .demo-grid {
