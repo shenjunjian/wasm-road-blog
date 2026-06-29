@@ -68,7 +68,7 @@ Node.js       → 原生扩展的跨平台替代、napi-rs Wasm 回退
 
 ### Wasm 跨语言复用与包生态
 
-Wasm 的核心价值之一，是把 **「一次编译，多处运行」** 从「同一语言内跨平台」扩展到 **跨语言边界**：Rust、C/C++、Go、AssemblyScript 等各自编译出 `.wasm`，宿主（浏览器 JS、Node、Python、Wasmer CLI 等）只需按统一的 `import` / `export` 约定加载，就能调用其中的函数——**调用方不必与编写方使用同一种语言**。例如用 Rust 写的图像压缩库编译为 `.wasm` 后，前端 JS 直接 `WebAssembly.instantiate` 调用；在 Node 里也可通过 `napi-wasm` 或 WASI 运行时复用同一份二进制。
+Wasm 的核心价值之一，是把 **「一次编译，多处运行」** 从「同一语言内跨平台」扩展到 **跨语言边界**：Rust、C/C++、Go、AssemblyScript 等各自编译出 `.wasm`，宿主（浏览器 JS、Node、Python、Wasmer CLI 等）只需按统一的 `import` / `export` 约定加载，就能调用其中的函数——**调用方不必与编写方使用同一种语言**。例如用 Rust 写的图像压缩库编译为 `.wasm` 后，前端 JS 直接 `WebAssembly.instantiate` 调用；在 Node 里也可通过 napi-rs 的 Wasm 回退（`*.wasi.cjs` + emnapi）复用同一份二进制。
 
 随着 **Component Model + WIT** 的发展，跨语言复用更进一步：接口以 `.wit` 描述，各语言通过 `wit-bindgen` 生成绑定，组件之间像拼乐高一样组合——这才是 Wasm 生态长期对标 npm 的方向。
 
@@ -103,7 +103,7 @@ flowchart TB
     subgraph node [Node.js路径]
         napi[napi-rs 原生 .node]
         wasi[wasm32-wasip1-threads]
-        napiwasm[napi-wasm 回退]
+        napiwasm[*.wasi.cjs + emnapi 回退]
     end
 
     foundation --> browser
@@ -1539,7 +1539,7 @@ flowchart TB
 |------|------|----------|----------|------------|----------|--------|
 | **[wasm-bindgen](https://github.com/rustwasm/wasm-bindgen)** | 绑定生成器（crate + CLI） | `wasm32-unknown-unknown` | 编译后 **后处理** `.wasm`：改写导出符号、生成 JS/TS 胶水、管理 linear memory 与字符串/闭包/table | `js-sys`、`web-sys`、`wasm-bindgen-futures`、`serde-wasm-bindgen`、`console_error_panic_hook`、`gloo`、`wasm-bindgen-test` | 浏览器、Workers、任何 JS 宿主 | ★★★★★ ~9k⭐，2026-06 仍在更新 |
 | **[wit-bindgen](https://github.com/bytecodealliance/wit-bindgen)** | WIT → 多语言绑定 | `wasm32-wasip1` / `wasip2` | 从 `.wit` 接口描述生成 Rust guest/host 代码；配合 `wasm-tools component new` 包装为 Component | `wit-bindgen-cli`、`wasm-tools`、`wasi` crate | Component Model、跨语言模块组合 | ★★★★ ~1.4k⭐，Bytecode Alliance 主力 |
-| **[napi-rs](https://github.com/napi-rs/napi-rs)** | Node 原生扩展 + Wasm 回退 | 原生：各平台 triple；Wasm：`wasm32-wasip1-threads` | `#[napi]` 宏展开为 Node-API C ABI；Wasm 路径用 WASI+线程模拟 N-API，由 `napi-wasm` 在 JS 侧加载 | `napi`、`napi-derive`、`napi-build`、`@napi-rs/cli`、`@napi-rs/wasm-runtime` | Node 高性能原生模块；无预编译 .node 时 Wasm 兜底 | ★★★★★ ~7.8k⭐，2026-06 活跃 |
+| **[napi-rs](https://github.com/napi-rs/napi-rs)** | Node 原生扩展 + Wasm 回退 | 原生：各平台 triple；Wasm：`wasm32-wasip1-threads` | `#[napi]` 宏展开为 Node-API C ABI；Wasm 路径由 CLI 生成 `*.wasi.cjs` + `@emnapi` 在 JS 侧加载 | `napi`、`napi-derive`、`napi-build`、`@napi-rs/cli`、`@emnapi/core` | Node 高性能原生模块；无预编译 .node 时 Wasm 兜底 | ★★★★★ ~7.8k⭐，2026-06 活跃 |
 | **[extism/rust-pdk](https://github.com/extism/rust-pdk)** | 插件 PDK | `wasm32-unknown-unknown` | 统一 **bytes-in/bytes-out** ABI，不依赖 Component Model；宿主通过 Extism runtime 调用 | `extism`（宿主 SDK）、`extism-pdk` 各语言版 | 插件系统、可嵌入多宿主（Go/JS/Rust…） | ★★★ extism 主仓 ~5.6k⭐；rust-pdk 较小 |
 
 重点关注 `wasm-bindgen, napi-rs` 即可！
@@ -2537,46 +2537,117 @@ Node.js 的性能敏感场景（图像处理、数据库驱动、加密、文件
 | `node-ffi` | 性能差，类型不安全 |
 | Neon（Rust） | 依赖 V8 API，随 Node 版本变化 |
 
-**napi-rs** 基于 **Node-API（N-API）**——Node.js 官方稳定的 C ABI：
+**napi-rs** 是基于 **Node-API（N-API）** 的 Rust 框架——Node.js 官方提供的稳定 C ABI，不依赖 V8 内部 API，编译出的 `.node` 可在不同 Node 大版本间复用。
 
-- 不依赖 V8 内部 API，ABI 跨 Node 版本稳定
-- 用 Rust 编写，内存安全
-- 无需 `node-gyp`
-- 同时支持原生 `.node` 和 Wasm 回退
+当前生态以 **v3**（2025-07 发布）为主，核心组成如下：
+
+| 组件 | 作用 |
+|------|------|
+| `napi` / `napi-derive` | Rust 侧绑定库与 `#[napi]` 过程宏 |
+| `napi-build` | `build.rs` 中的构建钩子 |
+| **`@napi-rs/cli`** | 官方 CLI：脚手架、编译、多平台产物、npm 发布 |
+| `@emnapi/core` / `@emnapi/runtime` | Wasm 回退运行时（由 CLI 在构建时注入到 `*.wasi.cjs`） |
+
+v3 相对 v2 的关键增量：
+
+- **Wasm 一等支持**：同一份 Rust 代码可编译为 `wasm32-wasip1-threads`，作为无预编译 `.node` 时的回退
+- **类型安全 API**：引入生命周期约束，重写 `ThreadsafeFunction` / `Function`
+- **交叉编译**：`napi build --use-napi-cross` 集成 zigbuild / xwin，无需巨型 Docker 镜像
+
+两条交付路径不变：
+
+- **首选**：各 OS/CPU 的原生 `.node`（如 `x86_64-pc-windows-msvc`）
+- **兜底**：Wasm 回退（目标 `wasm32-wasip1-threads`，由 `index.js` 自动加载 `*.wasi.cjs`）
+
+**Node 兼容性速查**（详见 [N-API Version Matrix](https://nodejs.org/api/n-api.html#node-api-version-matrix)）：
+
+| 场景 | 最低 Node 版本 | 说明 |
+|------|---------------|------|
+| `napi` crate 运行时 | **10.0.0** | 由 `napi1`–`napi10` feature 决定具体 API |
+| `@napi-rs/cli` v3 开发环境 | **16** | CLI 已放弃 Node 12/14 |
+| Wasm 回退（wasip1-threads） | **18–20+** | 需 WASI threads 支持，推荐 Node 20 LTS |
+| 日常开发 / CI | **20+ LTS** | 官方模板与社区项目的实际基线 |
 
 ```mermaid
 flowchart LR
-    init[napi-rs 项目初始化] --> native[7.2 编译原生 .node]
-    init --> wasmFallback[7.3 编译 Wasm 回退包]
+    cli["@napi-rs/cli\nnapi new / build"] --> init[7.2 项目初始化]
+    init --> native[7.3 编译原生 .node]
+    init --> wasmFallback[7.4 编译 Wasm 回退包]
     native --> requireNode["require / import .node"]
-    wasmFallback --> napiWasm["napi-wasm 加载 .wasm"]
+    wasmFallback --> wasiLoader["*.wasi.cjs + emnapi"]
 ```
 
-### 7.2 项目初始化
+### 7.2 项目初始化与 `@napi-rs/cli`
+
+[`@napi-rs/cli`](https://www.npmjs.com/package/@napi-rs/cli) 是 napi-rs 的**官方命令行工具**（v3 起用 Rust 重写），负责从创建项目到发布 npm 的全流程。旧版 `npm init napi-rs` 脚手架已不再推荐，当前标准入口是 **`napi new`**。
+
+#### 安装  
 
 ```bash
-# 需要 Node.js >= 16
-npm init napi-rs my-native
-cd my-native
-npm install
+pnpm add -g @napi-rs/cli
+ 
+napi new
+# 交互式填写：
+#   Package name  → 建议 @your-scope/my-native（scoped 包可避免 npm 垃圾检测误报）
+#   Dir name      → 项目目录名
+#   node-api version  → 支持到最小的napi版本， 目前最新是 napi9
+#   Targets       → 目标平台（A 全选 / 空格多选）
+#   GitHub Actions → 是否生成 CI 工作流
 ```
 
-生成的项目结构：
+#### `@napi-rs/cli` 常用命令
+
+| 命令 | 作用 |
+|------|------|
+| `napi new` | 交互式创建项目（克隆官方模板） |
+| `napi build` | 编译 Rust → 生成 `.node` + `index.js` + `index.d.ts` |
+| `napi build --platform --release` | 带平台后缀的产物（本地调试多平台命名） |
+| `napi build --use-napi-cross` | 交叉编译（zigbuild / xwin，GLIBC 2.17+） |
+| `napi create-npm-dirs` | 在 **CI 发布阶段**生成各平台 npm 分包目录（本地仓库不含 `npm/`,v3 建议在 CI 中执行） |
+| `napi artifacts` | 从 GitHub Actions 下载产物到本地 |
+| `napi prepublish -t npm` | 发布前整理 optionalDependencies 分包 |
+| `napi version` | 同步各平台分包版本号 |
+| `napi rename` | 重命名项目 / 二进制 / npm scope |
+| `napi universalize` | 合并 macOS universal binary |
+
+CLI v3 还提供**程序化 API**，可在构建脚本中直接调用：
+
+```typescript
+import { NapiCli } from '@napi-rs/cli'
+
+const { task } = await new NapiCli().build({
+  release: true,
+  platform: true,
+})
+await task
+```
+
+#### 生成的项目结构
+
+以 `napi new` 生成的工程（如本仓库的 `napi-rs-demo`）为例，**脚手架阶段**包含：
 
 ```
 my-native/
-├── Cargo.toml           # Rust 项目配置
-├── package.json         # npm 配置 + napi 字段
-├── build.rs             # 构建脚本
+├── Cargo.toml              # Rust 项目配置
+├── package.json            # npm 配置 + napi 字段
+├── build.rs                # 调用 napi_build::setup()
+├── .cargo/config.toml      # Rust 交叉编译配置
 ├── src/
-│   └── lib.rs           # Rust 源码
-├── index.js             # 自动生成：按平台加载 .node
-├── index.d.ts           # 自动生成：TypeScript 类型
-├── .github/
-│   └── workflows/
-│       └── CI.yml       # 多平台 CI 模板
+│   └── lib.rs              # Rust 源码（#[napi] 宏）
+├── index.js                # napi build 生成：平台检测 + 加载
+├── index.d.ts              # napi build 生成：TypeScript 类型
+├── __test__/               # 测试（ava + TypeScript）
+├── benchmark/              # 可选性能基准
+├── .github/workflows/
+│   └── CI.yml              # 多平台构建 / 测试 / 发布
+├── .yarnrc.yml             # yarn 4 配置（默认包管理器）
 └── rustfmt.toml
 ```
+
+> **注意**：最新模板**不再**包含 `browser.js` 或 `npm/` 目录。
+>
+> - **`npm/`**：仅在 CI 的 `publish` job 中通过 `napi create-npm-dirs` 临时生成，用于向 registry 推送各平台分包，**不提交到 Git**。
+> - **Wasm 相关文件**（构建后才出现，同样不提交）：`{binaryName}.wasm`、`{binaryName}.wasi.cjs`、`wasi-worker.mjs`；若在 `targets` 中启用了 `wasm32-wasip1-threads`，还会生成 `{binaryName}.wasi-browser.js` 供浏览器场景使用。
 
 **`Cargo.toml`**
 
@@ -2590,11 +2661,25 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-napi = "3"
-napi-derive = "3"
+napi = "3.0.0"
+napi-derive = "3.0.0"
 
 [build-dependencies]
 napi-build = "2"
+
+[profile.release]
+lto = true
+strip = "symbols"
+```
+
+**`build.rs`**
+
+```rust
+extern crate napi_build;
+
+fn main() {
+    napi_build::setup();
+}
 ```
 
 **`src/lib.rs`**
@@ -2626,31 +2711,13 @@ pub fn fibonacci_sequence(count: u32) -> Vec<u32> {
     seq
 }
 ```
+ 
+首次构建：
 
-**`package.json`（关键字段）**
-
-```json
-{
-  "name": "my-native",
-  "version": "0.1.0",
-  "main": "index.js",
-  "types": "index.d.ts",
-  "napi": {
-    "name": "my-native",
-    "triples": {
-      "defaults": true,
-      "additional": ["x86_64-pc-windows-msvc"]
-    }
-  },
-  "scripts": {
-    "build": "napi build --release",
-    "build:debug": "napi build",
-    "prepublishOnly": "napi prepublish -t npm"
-  },
-  "devDependencies": {
-    "@napi-rs/cli": "^2"
-  }
-}
+```bash
+yarn build
+# 等价于: napi build --platform --release
+# 产物示例: my-native.win32-x64-msvc.node
 ```
 
 ### 7.3 编译为原生 Node 模块
@@ -2658,9 +2725,11 @@ pub fn fibonacci_sequence(count: u32) -> Vec<u32> {
 #### 本地构建
 
 ```bash
-npm run build
-# 等价于: napi build --release
+yarn build
+# 等价于: napi build --platform --release
 ```
+
+`--platform` 会在文件名中附加 `{platform}-{arch}-{abi}` 后缀，便于本地调试时与 CI 产物命名一致。
 
 产物（以 Windows x64 为例）：
 
@@ -2668,7 +2737,7 @@ npm run build
 my-native.win32-x64-msvc.node
 ```
 
-命名规则：`{napi.name}.{platform}-{arch}-{abi}.node`
+命名规则：`{napi.binaryName}.{platform}-{arch}-{abi}.node`
 
 常见产物对照：
 
@@ -2680,116 +2749,145 @@ my-native.win32-x64-msvc.node
 | Linux x64 GNU | `my-native.linux-x64-gnu.node` |
 | Linux ARM64 | `my-native.linux-arm64-gnu.node` |
 
+指定 target 交叉编译：
+
+```bash
+# Linux GNU（可配合 --use-napi-cross）
+napi build --platform --release --target x86_64-unknown-linux-gnu --use-napi-cross
+
+# 当前 macOS 上编译 ARM64
+napi build --platform --release --target aarch64-apple-darwin
+```
+
+#### `index.js` 加载逻辑（CLI 自动生成）
+
+`napi build` 会生成 `index.js`，加载顺序大致如下：
+
+```
+1. NAPI_RS_NATIVE_LIBRARY_PATH 环境变量（强制指定 .node 路径）
+2. 项目根目录下的本地 *.node（开发调试）
+3. optionalDependency 平台分包（如 @your-scope/my-native-win32-x64-msvc）
+4. 若无可用原生 binding → 尝试 Wasm 回退（见 7.4）
+```
+
+简化示意：
+
+```javascript
+// index.js（自动生成，逻辑简化）
+function requireNative() {
+  if (process.env.NAPI_RS_NATIVE_LIBRARY_PATH) {
+    return require(process.env.NAPI_RS_NATIVE_LIBRARY_PATH)
+  }
+  if (process.platform === 'win32' && process.arch === 'x64') {
+    try { return require('./my-native.win32-x64-msvc.node') } catch {}
+    try { return require('@your-scope/my-native-win32-x64-msvc') } catch {}
+  }
+  // ... 其他平台类似
+}
+
+let nativeBinding = requireNative()
+if (!nativeBinding || process.env.NAPI_RS_FORCE_WASI) {
+  // Wasm 回退：*.wasi.cjs 或 @your-scope/my-native-wasm32-wasi
+}
+module.exports = nativeBinding
+```
+
 #### 多平台 CI 构建
 
-生产环境通过 GitHub Actions 为所有目标平台交叉编译：
+模板生成的 `.github/workflows/CI.yml` 典型流程：
 
 ```yaml
-# .github/workflows/CI.yml（napi-rs 模板自动生成）
 jobs:
   build:
     strategy:
       matrix:
         settings:
-          - host: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
           - host: windows-latest
+            build: yarn build --target x86_64-pc-windows-msvc
             target: x86_64-pc-windows-msvc
+          - host: ubuntu-latest
+            build: yarn build --target x86_64-unknown-linux-gnu --use-napi-cross
+            target: x86_64-unknown-linux-gnu
           - host: macos-latest
+            build: yarn build --target aarch64-apple-darwin
             target: aarch64-apple-darwin
-    # ...
+    steps:
+      # checkout → setup node → yarn install → ${{ matrix.settings.build }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bindings-${{ matrix.settings.target }}
+          path: |
+            my-native.*.node
+            my-native.*.wasm
+  publish:
+    needs: [build, test-...]
+    steps:
+      - run: yarn napi create-npm-dirs   # 临时生成 npm/ 分包目录
+      - run: yarn artifacts                # 将 CI 产物复制到 npm/
+      - run: npm publish --access public
 ```
 
-```bash
-# 本地交叉编译所有平台
-napi build --release --platform
-```
+各平台 `.node` 由 GitHub Actions matrix 分别编译，上传为 artifact，最终在 `publish` job 中汇总发布。
 
 #### 发布到 npm
 
+napi-rs 采用 **主包 + 平台分包** 模式（均建议使用 npm scope）：
+
+```
+@your-scope/my-native                          ← 主包（index.js + index.d.ts）
+@your-scope/my-native-win32-x64-msvc           ← Windows x64 原生二进制
+@your-scope/my-native-darwin-arm64             ← macOS ARM 原生二进制
+@your-scope/my-native-linux-x64-gnu            ← Linux x64 原生二进制
+@your-scope/my-native-wasm32-wasi              ← Wasm 回退（cpu: wasm32）
+```
+
+主包 `package.json` 通过 `optionalDependencies` 引用各平台分包。用户 `yarn add @your-scope/my-native` 时，包管理器根据当前 `os`/`cpu` 自动拉取匹配的二进制包。
+
+本地发布前：
+
 ```bash
-# 构建所有平台并准备 npm 发布
-napi prepublish -t npm
-
-# 发布
-npm publish
+yarn build --platform --release   # 本地验证
+# 正式多平台发布依赖 CI；本地可执行：
+napi prepublish -t npm            # 整理 optionalDependencies
 ```
 
-发布后，npm 包结构：
-
-```
-my-native/
-├── index.js                              # 平台检测 + 加载
-├── index.d.ts
-├── my-native.win32-x64-msvc.node         # optional dependency
-├── my-native.darwin-arm64.node           # optional dependency
-├── my-native.linux-x64-gnu.node          # optional dependency
-└── package.json
-```
-
-用户 `npm install my-native` 时，npm 根据当前 `os`/`cpu` 自动安装匹配的二进制包。
+> **`npm/` 目录**：只在 CI 的 `publish` 阶段由 `napi create-npm-dirs` 生成，**不会出现在 `napi new` 的初始工程中**，也不应提交到 Git。
 
 #### 在 Node.js 工程中引用
 
 **方式 1：npm 包（推荐，生产环境）**
 
 ```bash
-npm install my-native
+yarn add @your-scope/my-native
 ```
 
 ```javascript
-const { sum, greet, fibonacci_sequence } = require('my-native');
+const { sum, greet, fibonacci_sequence } = require('@your-scope/my-native')
 
-console.log(sum(1, 2));                    // 3
-console.log(greet('Node.js'));             // "Hello, Node.js!"
-console.log(fibonacci_sequence(10));
+console.log(sum(1, 2))                    // 3
+console.log(greet('Node.js'))             // "Hello, Node.js!"
+console.log(fibonacci_sequence(10))
 // [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
 ```
 
-`index.js` 内部逻辑（简化）：
+**方式 2：环境变量 / 直接路径（本地开发）**
 
-```javascript
-const { platform, arch } = process;
-let binding;
-if (platform === 'win32' && arch === 'x64') {
-  binding = require('./my-native.win32-x64-msvc.node');
-} else if (platform === 'darwin' && arch === 'arm64') {
-  binding = require('./my-native.darwin-arm64.node');
-}
-// ...
-module.exports = binding;
-```
-
-**方式 2：直接 require 完整路径（本地开发/调试）**
-
-```javascript
-const path = require('path');
-
-// 绝对路径加载
-const native = require(
-  path.resolve(__dirname, './my-native.win32-x64-msvc.node')
-);
-
-console.log(native.sum(10, 20)); // 30
+```bash
+# 强制加载指定 .node
+NAPI_RS_NATIVE_LIBRARY_PATH=./my-native.win32-x64-msvc.node node app.js
 ```
 
 ```javascript
-// ES Module 方式
-import { createRequire } from 'node:module';
-const require = createRequire(import.meta.url);
-
-const native = require(
-  new URL('./my-native.win32-x64-msvc.node', import.meta.url).pathname
-);
+const native = require('./my-native.win32-x64-msvc.node')
+console.log(native.sum(10, 20)) // 30
 ```
 
 **方式 3：pnpm / yarn workspace 本地引用**
 
 ```json
-// 消费方 package.json
 {
   "dependencies": {
-    "my-native": "workspace:*"
+    "@your-scope/my-native": "workspace:*"
   }
 }
 ```
@@ -2799,31 +2897,29 @@ const native = require(
 ```
 Rust 源码 (.rs)
     ↓ #[napi] 宏展开
-C ABI 导出函数 + __napi_register__* 注册函数
+C ABI 导出 + napi_register_module_v1 注册
     ↓ cargo build --release
 动态库 (.dll / .so / .dylib)
-    ↓ napi build 重命名
+    ↓ napi build --platform 重命名
 .node 文件
-    ↓ require('.node')
-Node.js 加载动态库，执行注册函数，挂载 exports
+    ↓ index.js require('.node')
+Node.js 加载动态库，挂载 exports
 ```
 
-- `#[napi]` 宏自动生成 JS 绑定代码和 N-API 注册逻辑
-- 加载 `.node` 时，Rust 的 `ctor` 机制自动执行 `__napi_register__*` 函数
-- 基于 N-API C ABI，**不同 Node.js 版本共用同一份 `.node`**（LTS 范围内）
+- `#[napi]` 宏自动生成 N-API 注册逻辑与 TypeScript 类型
+- 原生 target 下，`#[napi_derive::module_init]` 可在 `.node` 加载时执行一次性初始化（如 tokio runtime）
+- 基于 N-API C ABI，**同一份 `.node` 可在 LTS 范围内的多个 Node 大版本复用**
 
 #### 高级特性速览
 
 ```rust
 use napi_derive::napi;
 use napi::bindgen_prelude::*;
-use std::sync::Arc;
 use std::sync::Mutex;
 
 // 异步函数
 #[napi]
 pub async fn async_task(input: String) -> Result<String> {
-    // 在 Rust 异步运行时中执行
     Ok(format!("processed: {input}"))
 }
 
@@ -2861,16 +2957,18 @@ pub fn divide(a: f64, b: f64) -> Result<f64> {
 
 #### 何时需要 Wasm 回退
 
-原生 `.node` 需要为每个平台预编译。如果用户的平台没有对应的预编译包（如 riscv64、loongarch64，或某些 ARM 变体），就需要 Wasm 回退。
+原生 `.node` 需要为每个平台预编译。若用户平台没有对应分包（如 riscv64、特殊 ARM 变体），或 CI 尚未覆盖该 target，就需要 Wasm 兜底。
+
+**前提**：在 `package.json` 的 `napi.targets` 中包含 `wasm32-wasip1-threads`，并在 `napi new` 时勾选该平台。
 
 ```
-npm install my-native
+yarn add @your-scope/my-native
     ↓
-检查 optionalDependencies 中是否有匹配 os/cpu 的 .node 包
-    ├── 有 → 加载 .node（原生路径，性能最优）
-    └── 无 → 检查是否有 wasm32 包
-              ├── 有 → 加载 .wasm + napi-wasm（回退路径）
-              └── 无 → 安装失败
+index.js 尝试加载原生 .node（本地或 optionalDependency 分包）
+    ├── 成功 → 原生路径（性能最优）
+    └── 失败 → 尝试 *.wasi.cjs 或 @your-scope/my-native-wasm32-wasi
+                  ├── 成功 → Wasm 回退（自动，无需用户手动加载）
+                  └── 失败 → 抛出 Cannot find native binding
 ```
 
 #### Target 与工具链
@@ -2879,185 +2977,100 @@ npm install my-native
 |------|-----|
 | Rust Target | `wasm32-wasip1-threads` |
 | 与浏览器的区别 | 不是 `wasm32-unknown-unknown` |
-| 系统接口 | WASI P1 + 线程支持 |
+| 系统接口 | WASI P1 + 线程 + SharedArrayBuffer |
 | JS 绑定 | 不走 wasm-bindgen，走 N-API 语义 |
-| 宿主环境 | `napi-wasm` 包提供 N-API 实现 |
+| Node 宿主 | `@emnapi/core` + `*.wasi.cjs`（CLI 构建时生成） |
+| 浏览器宿主 | `*.wasi-browser.js`（CLI 构建时生成，需 COOP/COEP） |
 
 #### 构建 Wasm 包
 
 ```bash
-# 如有 C/C++ 依赖，先安装 wasi-sdk
-# Windows (PowerShell):
-# Invoke-WebRequest -Uri "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-25/wasi-sdk-25.0-x86_64-windows.tar.gz" -OutFile wasi-sdk.tar.gz
-# tar -xzf wasi-sdk.tar.gz
-# $env:WASI_SDK_PATH = "$PWD\wasi-sdk-25.0-x86_64-windows"
-
-# Linux/macOS:
-# wget https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-25/wasi-sdk-25.0-x86_64-linux.tar.gz
-# tar -xzf wasi-sdk-25.0-x86_64-linux.tar.gz
+# 如有 C/C++ 依赖，先安装并设置 wasi-sdk
 # export WASI_SDK_PATH="$(pwd)/wasi-sdk-25.0-x86_64-linux"
 
-napi build --release --target wasm32-wasip1-threads
+napi build --platform --release --target wasm32-wasip1-threads
 ```
 
-产物：`my-native.wasm`
+构建产物（**由 CLI 生成，不在脚手架中**）：
 
-#### Rust 侧：手动注册（Wasm 特有限制）
+```
+my-native.wasm                  # Wasm 二进制
+my-native.wasi.cjs              # Node.js 加载器（index.js 回退时 require）
+wasi-worker.mjs                 # WASI 线程 worker
+my-native.wasi-browser.js       # 浏览器加载器（Playground / StackBlitz 场景）
+```
 
-在原生 target 下，`#[napi]` 宏通过 Rust `ctor` 自动注册导出。但 **Wasm target 不支持 ctor**，必须手动实现 `napi_register_wasm_v1`：
+Rust 侧**无需**手写 `napi_register_wasm_v1`——`#[napi]` 宏与 CLI 会生成注册与加载胶水代码。`src/lib.rs` 与原生路径完全相同：
 
 ```rust
-use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
 #[napi]
 pub fn sum(a: i32, b: i32) -> i32 {
     a + b
 }
-
-#[napi]
-pub fn greet(name: String) -> String {
-    format!("Hello, {name}!")
-}
-
-// Wasm 专用注册函数
-#[cfg(target_family = "wasm")]
-#[no_mangle]
-pub unsafe extern "C" fn napi_register_wasm_v1(
-    env: napi::sys::napi_env,
-    exports: napi::sys::napi_value,
-) -> napi::sys::napi_value {
-    unsafe {
-        sum::register(env, exports);
-        greet::register(env, exports);
-    }
-    exports
-}
 ```
 
-#### npm 发布 Wasm 包
+#### 安装 Wasm 分包
 
-Wasm 包通过 `cpu: ["wasm32"]` 标记：
+Wasm 分包通过 `cpu: ["wasm32"]` 标记，包管理器**默认跳过**安装以减小体积。需要 Wasm 回退时，显式启用：
 
-```json
-{
-  "name": "my-native-wasm32-wasi",
-  "cpu": ["wasm32"],
-  "main": "my-native.wasm",
-  "files": ["my-native.wasm"]
-}
+```yaml
+# .yarnrc.yml（yarn 4）
+supportedArchitectures:
+  cpu:
+    - current
+    - wasm32
 ```
 
-安装 Wasm 架构包：
+```yaml
+# pnpm-workspace.yaml
+supportedArchitectures:
+  cpu:
+    - current
+    - wasm32
+```
 
 ```bash
 # npm >= 10.2
-npm install my-native --cpu=wasm32
-
-# yarn v4
-# .yarnrc.yml 中设置 supportedArchitectures.cpu: ["wasm32", "current"]
+npm install @your-scope/my-native --cpu=wasm32
 ```
 
-#### Node.js 中通过完整路径加载
+#### 调试与环境变量
 
-```javascript
-import { Environment, napi } from 'napi-wasm';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+| 环境变量 | 作用 |
+|---------|------|
+| `NAPI_RS_FORCE_WASI=1` | 强制走 Wasm 路径（即使原生 .node 可用） |
+| `NAPI_RS_FORCE_WASI=error` | 强制 Wasm；找不到则报错 |
+| `NAPI_RS_NATIVE_LIBRARY_PATH` | 强制指定原生 .node 路径 |
 
-async function loadNapiWasm() {
-  // 方式 1：从 node_modules 中按完整路径加载
-  const wasmPath = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    'node_modules/my-native-wasm32-wasi/my-native.wasm'
-  );
-
-  // 方式 2：任意绝对路径
-  // const wasmPath = 'D:/projects/my-native/my-native.wasm';
-
-  const bytes = await readFile(wasmPath);
-
-  // 注入 napi 宿主环境
-  const { instance } = await WebAssembly.instantiate(bytes, {
-    env: napi,
-  });
-
-  // 创建 N-API 环境，触发 napi_register_wasm_v1
-  const env = new Environment(instance);
-  const exports = env.exports;
-
-  // 像普通 napi-rs 模块一样调用
-  console.log(exports.sum(3, 4));       // 7
-  console.log(exports.greet('Wasm'));     // "Hello, Wasm!"
-}
-
-loadNapiWasm();
+```bash
+NAPI_RS_FORCE_WASI=1 node -e "console.log(require('@your-scope/my-native').sum(1,2))"
 ```
 
-CommonJS 版本：
+#### 浏览器中使用
 
-```javascript
-const { Environment, napi } = require('napi-wasm');
-const { readFileSync } = require('node:fs');
-const path = require('node:path');
+浏览器场景需启用 `SharedArrayBuffer`，开发服务器须设置响应头：
 
-const wasmPath = path.resolve(__dirname, './my-native.wasm');
-const bytes = readFileSync(wasmPath);
-
-const { instance } = new WebAssembly.Instance(
-  new WebAssembly.Module(bytes),
-  { env: napi }
-);
-
-const env = new Environment(instance);
-console.log(env.exports.sum(1, 2)); // 3
+```
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
 ```
 
-#### 封装为自动回退加载器
-
-生产项目中可封装统一的加载逻辑：
-
-```javascript
-// load-native.js
-function loadMyNative() {
-  try {
-    // 优先尝试原生 .node
-    return require('my-native');
-  } catch {
-    // 回退到 Wasm
-    const { Environment, napi } = require('napi-wasm');
-    const { readFileSync } = require('node:fs');
-    const path = require('node:path');
-
-    const wasmPath = path.join(
-      path.dirname(require.resolve('my-native-wasm32-wasi')),
-      'my-native.wasm'
-    );
-    const bytes = readFileSync(wasmPath);
-    const { instance } = new WebAssembly.Instance(
-      new WebAssembly.Module(bytes),
-      { env: napi }
-    );
-    return new Environment(instance).exports;
-  }
-}
-
-module.exports = loadMyNative();
-```
+Vite 示例见 [napi.rs WebAssembly 文档](https://napi.rs/docs/concepts/webassembly)。浏览器侧 import 构建生成的 `*.wasi-browser.js`，而非已废弃的独立 `browser.js` 模板文件。
 
 ### 7.5 两条路径对比
 
 | 维度 | 原生 `.node` | Wasm 回退 `.wasm` |
 |------|-------------|-------------------|
-| 编译 Target | 当前 OS/CPU（如 `x86_64-pc-windows-msvc`） | `wasm32-wasip1-threads` |
-| 产物 | `.node` 动态库 | `.wasm` 二进制 |
+| 编译 Target | 当前 OS/CPU triple | `wasm32-wasip1-threads` |
+| 产物 | `.node` 动态库 | `.wasm` + `*.wasi.cjs` |
 | 性能 | 最优（原生机器码） | 较慢（Wasm JIT，约 50%–80% 原生速度） |
-| 引用方式 | `require('pkg')` 或 `require('/path/to/xxx.node')` | `napi-wasm` + `WebAssembly.instantiate` + 完整 `.wasm` 路径 |
-| 绑定机制 | N-API 直接注册到 `exports` | N-API 通过 `napi-wasm` 模拟 |
-| 注册方式 | `#[napi]` 宏 + ctor 自动注册 | 手动 `napi_register_wasm_v1` |
-| 发布方式 | `optionalDependencies` 按 `os`/`cpu` 分发 | `cpu: ["wasm32"]` 标记 |
-| 安装 | `npm install my-native` | `npm install my-native --cpu=wasm32` |
+| 引用方式 | `require('@scope/pkg')`，`index.js` 自动选平台 | 同上，`index.js` 原生失败时自动回退 |
+| 绑定机制 | Node.js N-API 直接加载 | `@emnapi` 在 JS 侧模拟 N-API |
+| Rust 代码 | `#[napi]` 宏 | **同一份** `#[napi]` 代码，无需 fork |
+| 发布方式 | `@scope/pkg-{platform}-{arch}-{abi}` 分包 | `@scope/pkg-wasm32-wasi`（`cpu: wasm32`） |
+| 安装 | 包管理器按 os/cpu 自动选分包 | 需配置 `supportedArchitectures` 或 `--cpu=wasm32` |
 | 典型场景 | 生产环境、性能敏感 | 冷门平台、在线 Playground |
 | 与 wasm-bindgen | 无关 | 无关（走 N-API 语义，非 DOM 绑定） |
 
@@ -3068,14 +3081,14 @@ module.exports = loadMyNative();
 | 场景 | 工具链 | Target | 宿主 |
 |------|--------|--------|------|
 | 浏览器前端 | wasm-pack + wasm-bindgen | `wasm32-unknown-unknown` | 浏览器 JS 引擎 |
-| Node.js 生产 | napi-rs | 原生 OS/CPU | Node.js N-API |
-| Node.js 兜底 | napi-rs + napi-wasm | `wasm32-wasip1-threads` | napi-wasm 模拟 N-API |
+| Node.js 生产 | napi-rs + `@napi-rs/cli` | 原生 OS/CPU triple | Node.js N-API |
+| Node.js 兜底 | napi-rs + emnapi | `wasm32-wasip1-threads` | `*.wasi.cjs` 模拟 N-API |
 
 **关键原则：三条路径互不替代，各就其位。**
 
 ### 本章小结
 
-napi-rs 是 Rust 进入 Node.js 生态最成熟的方案。原生 `.node` 是生产首选——`npm install` 即可使用；Wasm 回退是兜底——通过 `napi-wasm` 和完整路径加载 `.wasm`。掌握这两条路径，就覆盖了 Node.js 中 Rust 集成的全部场景。
+napi-rs v3 + `@napi-rs/cli` v3 是 Rust 进入 Node.js 生态最成熟的方案。开发流程以 `napi new` 起步，`napi build --platform` 生成本地 `.node` 与 `index.js`；CI 通过 matrix 构建各平台 artifact，发布时 `napi create-npm-dirs` 临时生成分包目录。原生 `.node` 是生产首选；当平台分包不可用时，`index.js` 自动回退到 CLI 构建的 `*.wasi.cjs` + emnapi，**同一份 `#[napi]` Rust 代码**无需维护两套绑定。
 
 ---
 
@@ -3186,10 +3199,11 @@ console.log(instance.exports.get_byte(0));  // 72 ('H')
 
 | 错误 | 原因 | 解决 |
 |------|------|------|
-| `Cannot find module '.node'` | 当前平台无预编译包 | 本地 `napi build` 或安装 wasm32 回退 |
-| `NAPI_VERSION mismatch` | Node.js 版本过低 | 升级到 Node.js >= 10（推荐 LTS） |
-| Wasm 回退注册失败 | 未实现 `napi_register_wasm_v1` | 手动添加注册函数 |
-| `WASI_SDK_PATH not set` | 有 C 依赖但未配置 wasi-sdk | 下载并设置环境变量 |
+| `Cannot find native binding` | 当前平台无预编译分包 | 本地 `napi build --platform`；或启用 Wasm 回退（`supportedArchitectures.cpu` 含 `wasm32`） |
+| `NAPI_VERSION mismatch` | Node.js 版本过低 | 升级到 Node 20+ LTS；检查 `engines.node` |
+| Wasm 回退不生效 | 未安装 wasm32 分包或未构建 wasi 产物 | `napi build --target wasm32-wasip1-threads`；yarn/pnpm 配置 `wasm32` cpu |
+| `WASI_SDK_PATH not set` | 有 C/C++ 依赖但未配置 wasi-sdk | 下载 [wasi-sdk](https://github.com/WebAssembly/wasi-sdk/releases) 并设置环境变量 |
+| npm optionalDependencies 异常 | npm 10 已知 bug | 删除 `node_modules` 与 lockfile 重装；官方更推荐 yarn 4 / pnpm |
 
 ---
 
@@ -3216,13 +3230,13 @@ Wasm 原理
 
 Node.js 集成
 ├── napi-rs 原生 .node（生产首选）
-│   ├── #[napi] 宏导出
-│   ├── napi build --release
-│   └── require('pkg') 或 require 完整路径
+│   ├── napi new → napi build --platform --release
+│   ├── 主包 + @scope/pkg-{platform} optionalDependencies 分包
+│   └── require('@scope/pkg')，index.js 自动选平台
 └── napi-rs Wasm 回退（兜底）
     ├── wasm32-wasip1-threads
-    ├── napi_register_wasm_v1 手动注册
-    └── napi-wasm + WebAssembly.instantiate
+    ├── CLI 生成 *.wasi.cjs + @emnapi
+    └── index.js 原生失败时自动回退
 ```
 
 ### 延伸阅读
@@ -3234,6 +3248,6 @@ Node.js 集成
 - [Rust and WebAssembly 全书](https://rustwasm.github.io/docs/book/)
 - [napi.rs 官方文档](https://napi.rs/)
 - [napi.rs WebAssembly 支持](https://napi.rs/docs/concepts/webassembly)
-- [napi-wasm npm 包](https://www.npmjs.com/package/napi-wasm)
+- [@emnapi/core](https://www.npmjs.com/package/@emnapi/core)
 - [WASI 官网](https://wasi.dev/)
 - [MDN WebAssembly API](https://developer.mozilla.org/en-US/docs/WebAssembly)
