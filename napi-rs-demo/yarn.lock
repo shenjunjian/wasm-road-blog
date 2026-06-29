@@ -583,28 +583,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@napi-rs/package-template@workspace:.":
-  version: 0.0.0-use.local
-  resolution: "@napi-rs/package-template@workspace:."
-  dependencies:
-    "@emnapi/core": "npm:^1.5.0"
-    "@emnapi/runtime": "npm:^1.5.0"
-    "@napi-rs/cli": "npm:^3.2.0"
-    "@oxc-node/core": "npm:^0.1.0"
-    "@taplo/cli": "npm:^0.7.0"
-    "@tybys/wasm-util": "npm:^0.10.0"
-    ava: "npm:^8.0.0"
-    chalk: "npm:^5.6.2"
-    husky: "npm:^9.1.7"
-    lint-staged: "npm:^17.0.0"
-    npm-run-all2: "npm:^9.0.0"
-    oxlint: "npm:^1.14.0"
-    prettier: "npm:^3.6.2"
-    tinybench: "npm:^6.0.0"
-    typescript: "npm:^6.0.0"
-  languageName: unknown
-  linkType: soft
-
 "@napi-rs/tar-android-arm-eabi@npm:1.1.0":
   version: 1.1.0
   resolution: "@napi-rs/tar-android-arm-eabi@npm:1.1.0"
@@ -2505,6 +2483,28 @@ __metadata:
   checksum: 10c0/2cf48a2087175c60c8dcdbc619908b49c07f7adcfc37d29236b0c5c612d6204f789104c98cc44d38acab7b3c96f4a3ec2cfdc4934d0738d876dbefa2a12c69f4
   languageName: node
   linkType: hard
+
+"napi-rs-demo@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "napi-rs-demo@workspace:."
+  dependencies:
+    "@emnapi/core": "npm:^1.5.0"
+    "@emnapi/runtime": "npm:^1.5.0"
+    "@napi-rs/cli": "npm:^3.2.0"
+    "@oxc-node/core": "npm:^0.1.0"
+    "@taplo/cli": "npm:^0.7.0"
+    "@tybys/wasm-util": "npm:^0.10.0"
+    ava: "npm:^8.0.0"
+    chalk: "npm:^5.6.2"
+    husky: "npm:^9.1.7"
+    lint-staged: "npm:^17.0.0"
+    npm-run-all2: "npm:^9.0.0"
+    oxlint: "npm:^1.14.0"
+    prettier: "npm:^3.6.2"
+    tinybench: "npm:^6.0.0"
+    typescript: "npm:^6.0.0"
+  languageName: unknown
+  linkType: soft
 
 "node-fetch@npm:^2.6.7":
   version: 2.7.0

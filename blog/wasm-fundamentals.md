@@ -2712,15 +2712,30 @@ pub fn fibonacci_sequence(count: u32) -> Vec<u32> {
 }
 ```
  
-首次构建：
+### 7.3 编译为原生 Node 模块
 
-```bash
-yarn build
-# 等价于: napi build --platform --release
-# 产物示例: my-native.win32-x64-msvc.node
+ `napi-rs-demo` 就是官方 `package-template` 生成的：
+```
+  "packageManager": "yarn@4.17.0"
 ```
 
-### 7.3 编译为原生 Node 模块
+它要求必须使用yarn包， 选 Yarn 主要是因为 npm 缺少一些 napi-rs 工作流必需的能力，尤其是 supportedArchitectures（跨架构安装依赖）。napi-rs 的发布模型是：主包 + 多个平台分包（optionalDependencies）。CI 需要在 x64 机器上安装 arm64、armv7、musl 等架构的包来做交叉测试。
+
+Yarn Classic（1.x）最新是1.22.22， Yarn Modern（2 / 3 / 4）版本不会发布到 npm 的 yarn 包上。 
+
+Node.js 18+ 自带 Corepack，它会读 package.json 里的 packageManager 字段，自动下载对应版本。
+
+```bash
+# 1. 启用 Corepack（只需做一次）
+corepack enable
+# 2. 进入项目目录
+cd d:\WORK\wasm-road-blog\napi-rs-demo
+# 3. 让 Corepack 准备 Yarn 4.17.0
+corepack install
+# 4. 验证版本
+yarn --version
+# 应输出 4.17.0
+```
 
 #### 本地构建
 
