@@ -557,4 +557,7 @@ if (!nativeBinding) {
 }
 
 module.exports = nativeBinding
+module.exports.Calculator = nativeBinding.Calculator
+module.exports.asyncTask = nativeBinding.asyncTask
+module.exports.divide = nativeBinding.divide
 module.exports.plus100 = nativeBinding.plus100

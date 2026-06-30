@@ -2588,7 +2588,7 @@ pnpm add -g @napi-rs/cli
  
 napi new
 # 交互式填写：
-#   Package name  → 建议 @your-scope/my-native（scoped 包可避免 npm 垃圾检测误报）
+#   Package name  → 建议 @your-scope/napi-rs-demo（scoped 包可避免 npm 垃圾检测误报）
 #   Dir name      → 项目目录名
 #   node-api version  → 支持到最小的napi版本， 目前最新是 napi9
 #   Targets       → 目标平台（A 全选 / 空格多选）
@@ -2627,7 +2627,7 @@ await task
 以 `napi new` 生成的工程（如本仓库的 `napi-rs-demo`）为例，**脚手架阶段**包含：
 
 ```
-my-native/
+napi-rs-demo/
 ├── Cargo.toml              # Rust 项目配置
 ├── package.json            # npm 配置 + napi 字段
 ├── build.rs                # 调用 napi_build::setup()
@@ -2653,7 +2653,7 @@ my-native/
 
 ```toml
 [package]
-name = "my-native"
+name = "napi-rs-demo"
 version = "0.1.0"
 edition = "2021"
 
@@ -2749,7 +2749,7 @@ yarn build
 产物（以 Windows x64 为例）：
 
 ```
-my-native.win32-x64-msvc.node
+napi-rs-demo.win32-x64-msvc.node
 ```
 
 命名规则：`{napi.binaryName}.{platform}-{arch}-{abi}.node`
@@ -2758,11 +2758,11 @@ my-native.win32-x64-msvc.node
 
 | 平台 | 文件名 |
 |------|--------|
-| Windows x64 | `my-native.win32-x64-msvc.node` |
-| macOS ARM | `my-native.darwin-arm64.node` |
-| macOS x64 | `my-native.darwin-x64.node` |
-| Linux x64 GNU | `my-native.linux-x64-gnu.node` |
-| Linux ARM64 | `my-native.linux-arm64-gnu.node` |
+| Windows x64 | `napi-rs-demo.win32-x64-msvc.node` |
+| macOS ARM | `napi-rs-demo.darwin-arm64.node` |
+| macOS x64 | `napi-rs-demo.darwin-x64.node` |
+| Linux x64 GNU | `napi-rs-demo.linux-x64-gnu.node` |
+| Linux ARM64 | `napi-rs-demo.linux-arm64-gnu.node` |
 
 指定 target 交叉编译：
 
@@ -2781,7 +2781,7 @@ napi build --platform --release --target aarch64-apple-darwin
 ```
 1. NAPI_RS_NATIVE_LIBRARY_PATH 环境变量（强制指定 .node 路径）
 2. 项目根目录下的本地 *.node（开发调试）
-3. optionalDependency 平台分包（如 @your-scope/my-native-win32-x64-msvc）
+3. optionalDependency 平台分包（如 @your-scope/napi-rs-demo-win32-x64-msvc）
 4. 若无可用原生 binding → 尝试 Wasm 回退（见 7.4）
 ```
 
@@ -2794,15 +2794,15 @@ function requireNative() {
     return require(process.env.NAPI_RS_NATIVE_LIBRARY_PATH)
   }
   if (process.platform === 'win32' && process.arch === 'x64') {
-    try { return require('./my-native.win32-x64-msvc.node') } catch {}
-    try { return require('@your-scope/my-native-win32-x64-msvc') } catch {}
+    try { return require('./napi-rs-demo.win32-x64-msvc.node') } catch {}
+    try { return require('@your-scope/napi-rs-demo-win32-x64-msvc') } catch {}
   }
   // ... 其他平台类似
 }
 
 let nativeBinding = requireNative()
 if (!nativeBinding || process.env.NAPI_RS_FORCE_WASI) {
-  // Wasm 回退：*.wasi.cjs 或 @your-scope/my-native-wasm32-wasi
+  // Wasm 回退：*.wasi.cjs 或 @your-scope/napi-rs-demo-wasm32-wasi
 }
 module.exports = nativeBinding
 ```
@@ -2832,8 +2832,8 @@ jobs:
         with:
           name: bindings-${{ matrix.settings.target }}
           path: |
-            my-native.*.node
-            my-native.*.wasm
+            napi-rs-demo.*.node
+            napi-rs-demo.*.wasm
   publish:
     needs: [build, test-...]
     steps:
@@ -2849,14 +2849,14 @@ jobs:
 napi-rs 采用 **主包 + 平台分包** 模式（均建议使用 npm scope）：
 
 ```
-@your-scope/my-native                          ← 主包（index.js + index.d.ts）
-@your-scope/my-native-win32-x64-msvc           ← Windows x64 原生二进制
-@your-scope/my-native-darwin-arm64             ← macOS ARM 原生二进制
-@your-scope/my-native-linux-x64-gnu            ← Linux x64 原生二进制
-@your-scope/my-native-wasm32-wasi              ← Wasm 回退（cpu: wasm32）
+@your-scope/napi-rs-demo                          ← 主包（index.js + index.d.ts）
+@your-scope/napi-rs-demo-win32-x64-msvc           ← Windows x64 原生二进制
+@your-scope/napi-rs-demo-darwin-arm64             ← macOS ARM 原生二进制
+@your-scope/napi-rs-demo-linux-x64-gnu            ← Linux x64 原生二进制
+@your-scope/napi-rs-demo-wasm32-wasi              ← Wasm 回退（cpu: wasm32）
 ```
 
-主包 `package.json` 通过 `optionalDependencies` 引用各平台分包。用户 `yarn add @your-scope/my-native` 时，包管理器根据当前 `os`/`cpu` 自动拉取匹配的二进制包。
+主包 `package.json` 通过 `optionalDependencies` 引用各平台分包。用户 `yarn add @your-scope/napi-rs-demo` 时，包管理器根据当前 `os`/`cpu` 自动拉取匹配的二进制包。
 
 本地发布前：
 
@@ -2870,43 +2870,14 @@ napi prepublish -t npm            # 整理 optionalDependencies
 
 #### 在 Node.js 工程中引用
 
-**方式 1：npm 包（推荐，生产环境）**
-
-```bash
-yarn add @your-scope/my-native
-```
-
 ```javascript
-const { sum, greet, fibonacci_sequence } = require('@your-scope/my-native')
+const { sum, greet, fibonacci_sequence } = require('@your-scope/napi-rs-demo')
 
 console.log(sum(1, 2))                    // 3
 console.log(greet('Node.js'))             // "Hello, Node.js!"
 console.log(fibonacci_sequence(10))
 // [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
 ```
-
-**方式 2：环境变量 / 直接路径（本地开发）**
-
-```bash
-# 强制加载指定 .node
-NAPI_RS_NATIVE_LIBRARY_PATH=./my-native.win32-x64-msvc.node node app.js
-```
-
-```javascript
-const native = require('./my-native.win32-x64-msvc.node')
-console.log(native.sum(10, 20)) // 30
-```
-
-**方式 3：pnpm / yarn workspace 本地引用**
-
-```json
-{
-  "dependencies": {
-    "@your-scope/my-native": "workspace:*"
-  }
-}
-```
-
 #### 原生模块工作原理
 
 ```
@@ -2927,16 +2898,61 @@ Node.js 加载动态库，挂载 exports
 
 #### 高级特性速览
 
+**异步函数**：Rust 侧写 `async fn`，napi-rs 会自动导出为 JS 侧返回 `Promise` 的函数。需两步配置：
+
+1. **启用 feature**：在 `Cargo.toml` 为 `napi` 打开 `async`（或 `tokio_rt`）feature。
+2. **初始化 runtime**（可选但推荐）：用 `#[napi_derive::module_init]` 在 `.node` 加载时注册自定义 tokio runtime；不配置时 napi-rs 会使用内置默认 runtime。
+
+`Cargo.toml`：
+
+```toml
+[dependencies]
+napi = { version = "3", features = ["async"] }
+napi-derive = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+```
+
+`src/lib.rs`：
+
+```rust
+use napi::bindgen_prelude::*;
+use napi_derive::napi;
+use std::time::Duration;
+
+#[cfg(not(target_family = "wasm"))]
+#[napi_derive::module_init]
+fn init() {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name("napi-rs-demo")
+        .build()
+        .unwrap();
+    create_custom_tokio_runtime(rt);
+}
+
+// async fn → JS 侧 asyncTask() 返回 Promise
+#[napi]
+pub async fn async_task(input: String) -> Result<String> {
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    Ok(format!("processed: {input}"))
+}
+```
+
+> `module_init` 依赖 `ctor` 在动态库加载时执行，**Wasm target 不可用**，需用 `#[cfg(not(target_family = "wasm"))]` 条件编译。
+
+JS 侧调用：
+
+```javascript
+const { asyncTask } = require('@your-scope/napi-rs-demo')
+
+const result = await asyncTask('hello')  // Promise → "processed: hello"
+console.log(result)
+```
+
 ```rust
 use napi_derive::napi;
 use napi::bindgen_prelude::*;
 use std::sync::Mutex;
-
-// 异步函数
-#[napi]
-pub async fn async_task(input: String) -> Result<String> {
-    Ok(format!("processed: {input}"))
-}
 
 // 导出 JS 类
 #[napi]
@@ -2951,6 +2967,7 @@ impl Calculator {
         Calculator { acc: Mutex::new(0.0) }
     }
 
+    #[napi]
     pub fn add(&self, v: f64) -> f64 {
         let mut acc = self.acc.lock().unwrap();
         *acc += v;
@@ -2977,11 +2994,11 @@ pub fn divide(a: f64, b: f64) -> Result<f64> {
 **前提**：在 `package.json` 的 `napi.targets` 中包含 `wasm32-wasip1-threads`，并在 `napi new` 时勾选该平台。
 
 ```
-yarn add @your-scope/my-native
+yarn add @your-scope/napi-rs-demo
     ↓
 index.js 尝试加载原生 .node（本地或 optionalDependency 分包）
     ├── 成功 → 原生路径（性能最优）
-    └── 失败 → 尝试 *.wasi.cjs 或 @your-scope/my-native-wasm32-wasi
+    └── 失败 → 尝试 *.wasi.cjs 或 @your-scope/napi-rs-demo-wasm32-wasi
                   ├── 成功 → Wasm 回退（自动，无需用户手动加载）
                   └── 失败 → 抛出 Cannot find native binding
 ```
@@ -3009,10 +3026,10 @@ napi build --platform --release --target wasm32-wasip1-threads
 构建产物（**由 CLI 生成，不在脚手架中**）：
 
 ```
-my-native.wasm                  # Wasm 二进制
-my-native.wasi.cjs              # Node.js 加载器（index.js 回退时 require）
+napi-rs-demo.wasm                  # Wasm 二进制
+napi-rs-demo.wasi.cjs              # Node.js 加载器（index.js 回退时 require）
 wasi-worker.mjs                 # WASI 线程 worker
-my-native.wasi-browser.js       # 浏览器加载器（Playground / StackBlitz 场景）
+napi-rs-demo.wasi-browser.js       # 浏览器加载器（Playground / StackBlitz 场景）
 ```
 
 Rust 侧**无需**手写 `napi_register_wasm_v1`——`#[napi]` 宏与 CLI 会生成注册与加载胶水代码。`src/lib.rs` 与原生路径完全相同：
@@ -3048,7 +3065,7 @@ supportedArchitectures:
 
 ```bash
 # npm >= 10.2
-npm install @your-scope/my-native --cpu=wasm32
+npm install @your-scope/napi-rs-demo --cpu=wasm32
 ```
 
 #### 调试与环境变量
@@ -3060,7 +3077,7 @@ npm install @your-scope/my-native --cpu=wasm32
 | `NAPI_RS_NATIVE_LIBRARY_PATH` | 强制指定原生 .node 路径 |
 
 ```bash
-NAPI_RS_FORCE_WASI=1 node -e "console.log(require('@your-scope/my-native').sum(1,2))"
+NAPI_RS_FORCE_WASI=1 node -e "console.log(require('@your-scope/napi-rs-demo').sum(1,2))"
 ```
 
 #### 浏览器中使用
