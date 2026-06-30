@@ -3016,33 +3016,23 @@ index.js 尝试加载原生 .node（本地或 optionalDependency 分包）
 
 #### 构建 Wasm 包
 
-```bash
-# 如有 C/C++ 依赖，先安装并设置 wasi-sdk
-# export WASI_SDK_PATH="$(pwd)/wasi-sdk-25.0-x86_64-linux"
+首先 `package.json`的 `napi.targets` 添加一项 "wasm32-wasip1-threads"后，才能编译出“胶水代码”。
+其次要为rust环境添加一个构建目标 "wasm32-wasip1-threads"才行。
 
-napi build --platform --release --target wasm32-wasip1-threads
+```bash
+rustup target add wasm32-wasip1-threads
+
+napi build --platform --release --target wasm32-wasip1-threads -o ./wasm-output
 ```
 
-构建产物（**由 CLI 生成，不在脚手架中**）：
+构建后自动生成（实际产物更多，参见工程）：
 
 ```
 napi-rs-demo.wasm                  # Wasm 二进制
 napi-rs-demo.wasi.cjs              # Node.js 加载器（index.js 回退时 require）
-wasi-worker.mjs                 # WASI 线程 worker
+wasi-worker.mjs                    # WASI 线程 worker
 napi-rs-demo.wasi-browser.js       # 浏览器加载器（Playground / StackBlitz 场景）
 ```
-
-Rust 侧**无需**手写 `napi_register_wasm_v1`——`#[napi]` 宏与 CLI 会生成注册与加载胶水代码。`src/lib.rs` 与原生路径完全相同：
-
-```rust
-use napi_derive::napi;
-
-#[napi]
-pub fn sum(a: i32, b: i32) -> i32 {
-    a + b
-}
-```
-
 #### 安装 Wasm 分包
 
 Wasm 分包通过 `cpu: ["wasm32"]` 标记，包管理器**默认跳过**安装以减小体积。需要 Wasm 回退时，显式启用：
