@@ -3033,30 +3033,6 @@ napi-rs-demo.wasi.cjs              # Node.js 加载器（index.js 回退时 requ
 wasi-worker.mjs                    # WASI 线程 worker
 napi-rs-demo.wasi-browser.js       # 浏览器加载器（Playground / StackBlitz 场景）
 ```
-#### 安装 Wasm 分包
-
-Wasm 分包通过 `cpu: ["wasm32"]` 标记，包管理器**默认跳过**安装以减小体积。需要 Wasm 回退时，显式启用：
-
-```yaml
-# .yarnrc.yml（yarn 4）
-supportedArchitectures:
-  cpu:
-    - current
-    - wasm32
-```
-
-```yaml
-# pnpm-workspace.yaml
-supportedArchitectures:
-  cpu:
-    - current
-    - wasm32
-```
-
-```bash
-# npm >= 10.2
-npm install @your-scope/napi-rs-demo --cpu=wasm32
-```
 
 #### 调试与环境变量
 
@@ -3069,6 +3045,10 @@ npm install @your-scope/napi-rs-demo --cpu=wasm32
 ```bash
 NAPI_RS_FORCE_WASI=1 node -e "console.log(require('@your-scope/napi-rs-demo').sum(1,2))"
 ```
+
+#### Nodejs中使用
+
+
 
 #### 浏览器中使用
 
@@ -3098,15 +3078,29 @@ Vite 示例见 [napi.rs WebAssembly 文档](https://napi.rs/docs/concepts/webass
 
 ### 7.6 三条 Wasm/Native 路径总览
 
-至此，本文涉及三条不同的集成路径：
+至此，本文涉及三条集成路径（napi-rs Wasm 回退在 Node 与浏览器各有一条加载链路，见下表末行）：
 
-| 场景 | 工具链 | Target | 宿主 |
-|------|--------|--------|------|
-| 浏览器前端 | wasm-pack + wasm-bindgen | `wasm32-unknown-unknown` | 浏览器 JS 引擎 |
-| Node.js 生产 | napi-rs + `@napi-rs/cli` | 原生 OS/CPU triple | Node.js N-API |
-| Node.js 兜底 | napi-rs + emnapi | `wasm32-wasip1-threads` | `*.wasi.cjs` 模拟 N-API |
+| 场景 | 工具链 | Target | 宿主 / 加载器 |
+|------|--------|--------|---------------|
+| 浏览器前端 | wasm-pack + wasm-bindgen | `wasm32-unknown-unknown` | 浏览器 JS 引擎（`pkg/*.js`） |
+| Node.js 生产 | napi-rs + `@napi-rs/cli` | 原生 OS/CPU triple | Node.js N-API（`.node`） |
+| Node.js 兜底 | napi-rs + emnapi | `wasm32-wasip1-threads` | `*.wasi.cjs`（`index.js` 自动回退） |
+| 浏览器演示 | napi-rs + emnapi | `wasm32-wasip1-threads` | `*.wasi-browser.js`（需 COOP/COEP） |
 
-**关键原则：三条路径互不替代，各就其位。**
+**napi-rs Wasm 能否在浏览器运行？** `*.wasi.cjs` **不能**——它依赖 `node:fs`、`worker_threads` 等 Node API，仅供 Node 回退。浏览器须手动 import CLI 生成的 `*.wasi-browser.js`，并启用 SharedArrayBuffer（COOP/COEP）；这是 Playground 演示路径，**不是**前端生产方案。
+
+#### wasm-pack 与 napi-rs Wasm 速查
+
+| 维度 | wasm-pack + wasm-bindgen | napi-rs Wasm 回退 |
+|------|--------------------------|-------------------|
+| 设计目标 | 浏览器 / JS 宿主的一等 Wasm 库 | Node `.node` 的兜底；浏览器为附带能力 |
+| Rust 写法 | `#[wasm_bindgen]`、`js-sys` / `web-sys` | `#[napi]`，**与原生 `.node` 同一份代码** |
+| 绑定机制 | wasm-bindgen 生成 Rust↔JS 互操作 | emnapi 在 JS 侧模拟 Node N-API |
+| 浏览器 | 默认路径 | 次要路径（`*.wasi-browser.js` + COOP/COEP） |
+| DOM / Web API | ✅ `web-sys` | ❌ 无 |
+| WASI / 线程 | ❌ 裸 Wasm，无 syscall | ✅ WASI P1 + SharedArrayBuffer + Worker |
+
+**关键原则：三条路径互不替代，各就其位**——前端库走 wasm-pack；Node 扩展走 napi-rs 原生；Wasm 回退只为补缺平台或在线演示，不能替代 wasm-bindgen 做浏览器集成。
 
 ### 本章小结
 
@@ -3226,40 +3220,6 @@ console.log(instance.exports.get_byte(0));  // 72 ('H')
 | Wasm 回退不生效 | 未安装 wasm32 分包或未构建 wasi 产物 | `napi build --target wasm32-wasip1-threads`；yarn/pnpm 配置 `wasm32` cpu |
 | `WASI_SDK_PATH not set` | 有 C/C++ 依赖但未配置 wasi-sdk | 下载 [wasi-sdk](https://github.com/WebAssembly/wasi-sdk/releases) 并设置环境变量 |
 | npm optionalDependencies 异常 | npm 10 已知 bug | 删除 `node_modules` 与 lockfile 重装；官方更推荐 yarn 4 / pnpm |
-
----
-
-## 总结与延伸阅读
-
-### 知识链回顾
-
-```
-Wasm 原理
-├── 栈式虚拟机（操作数栈 + 控制流栈）
-├── 12 种标准段（type / import / export / code / data ...）
-├── 172 条 MVP 指令（控制流 / 内存 / 数值）
-├── 4 种基本值类型（i32 / i64 / f32 / f64）
-└── 平台限制（无 GC / 无 DOM / 无 I/O → 全靠 import）
-
-浏览器集成
-├── instantiateStreaming 流式加载
-├── imports 对象匹配 import 段
-└── wasm-pack + wasm-bindgen 生态
-    ├── wasm-bindgen：Rust ↔ JS 绑定
-    ├── js-sys：JS 内置对象
-    ├── web-sys：Web API
-    └── wasm-bindgen-futures：异步互操作
-
-Node.js 集成
-├── napi-rs 原生 .node（生产首选）
-│   ├── napi new → napi build --platform --release
-│   ├── 主包 + @scope/pkg-{platform} optionalDependencies 分包
-│   └── require('@scope/pkg')，index.js 自动选平台
-└── napi-rs Wasm 回退（兜底）
-    ├── wasm32-wasip1-threads
-    ├── CLI 生成 *.wasi.cjs + @emnapi
-    └── index.js 原生失败时自动回退
-```
 
 ### 延伸阅读
 
