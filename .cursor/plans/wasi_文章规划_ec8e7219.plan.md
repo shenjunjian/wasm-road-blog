@@ -13,10 +13,10 @@ todos:
     status: cancelled
   - id: write-core
     content: 撰写核心章节：Component/WIT、P2 API、P2 开发、P3 概念差异（无 demo）、产物调用、应用场景与开源案例
-    status: pending
+    status: completed
   - id: write-rest
     content: 补写开篇、P1 简史、运行时选型、附录与 README 索引
-    status: pending
+    status: completed
 isProject: false
 ---
 
