@@ -1,0 +1,14 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["shenjunjian <40288193@qq.com>"]
+license = "MIT OR Apache-2.0"
+
+[profile.release]
+lto = true
+opt-level = "s"
+strip = true

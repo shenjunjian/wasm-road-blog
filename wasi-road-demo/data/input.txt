@@ -1,0 +1,1 @@
+Hello from wasi-road-demo preopen data directory.

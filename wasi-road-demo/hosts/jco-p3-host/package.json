@@ -1,0 +1,14 @@
+{
+  "name": "jco-p3-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Node.js host: preview3-shim + run wasi-p3-cli-demo async Component",
+  "scripts": {
+    "transpile": "echo \"TODO: jco transpile with preview3-shim\"",
+    "run": "echo \"TODO: node run.js\""
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "^1.7.0"
+  }
+}

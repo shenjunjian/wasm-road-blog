@@ -1,0 +1,11 @@
+[package]
+name = "wasi-p2-cli-demo"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "WASI P2 (wasm32-wasip2) Component CLI demo — filesystem + env/args"
+
+[[bin]]
+name = "wasi-p2-cli-demo"
+path = "src/main.rs"

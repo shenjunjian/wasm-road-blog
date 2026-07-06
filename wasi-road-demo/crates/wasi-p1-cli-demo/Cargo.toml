@@ -1,0 +1,11 @@
+[package]
+name = "wasi-p1-cli-demo"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "WASI P1 (wasm32-wasip1) minimal CLI demo — hello + preopen filesystem"
+
+[[bin]]
+name = "wasi-p1-cli-demo"
+path = "src/main.rs"

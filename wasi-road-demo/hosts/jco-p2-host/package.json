@@ -1,0 +1,14 @@
+{
+  "name": "jco-p2-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Node.js host: jco transpile + run wasi-p2-cli-demo Component",
+  "scripts": {
+    "transpile": "echo \"TODO: jco transpile ../crates/wasi-p2-cli-demo target\"",
+    "run": "echo \"TODO: node run.js\""
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "^1.7.0"
+  }
+}
