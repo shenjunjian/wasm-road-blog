@@ -47,26 +47,27 @@ rustup target add wasm32-wasip3 --toolchain nightly
 
 | Crate | Target | 验证方式 | 状态 |
 |-------|--------|----------|------|
-| `wasi-p1-cli-demo` | `wasm32-wasip1` | `wasmtime run` | 骨架 |
-| `wasi-p2-cli-demo` | `wasm32-wasip2` | `wasmtime run` + `hosts/jco-p2-host` | 骨架 |
+| `wasi-p1-cli-demo` | `wasm32-wasip1` | `wasmtime run` | 已实现 |
+| `wasi-p2-cli-demo` | `wasm32-wasip2` | `wasmtime run` + `hosts/jco-p2-host` | 已实现 |
 | `wasi-p3-cli-demo` | `wasm32-wasip3` | `wasmtime run -S preview3=y` + `hosts/jco-p3-host` | 骨架 |
 
-## 快速运行（骨架阶段）
-
-当前 crate 为占位实现，完整逻辑将在后续任务中补全。
+## 快速运行
 
 ```bash
-# 构建全部（需已安装对应 target）
-bash scripts/build-all.sh
+# 构建 P1 / P2
+cargo build --target wasm32-wasip1 --release -p wasi-p1-cli-demo
+cargo build --target wasm32-wasip2 --release -p wasi-p2-cli-demo
 
-# 单独运行 P1
+# 运行 P1：读 data/input.txt，写 data/output.txt，打印 args/env
 bash scripts/run-p1.sh
+wasmtime run --dir=./data::/data --env WASI_DEMO=p1 target/wasm32-wasip1/release/wasi-p1-cli-demo.wasm -- hello
 
-# 单独运行 P2
+# 运行 P2（产物为 Component）
 bash scripts/run-p2.sh
+wasmtime run --dir=./data::/data --env WASI_DEMO=p2 target/wasm32-wasip2/release/wasi-p2-cli-demo.wasm -- hello
 
-# 单独运行 P3（nightly + preview3）
-bash scripts/run-p3.sh
+# 构建全部（含 P3 nightly）
+bash scripts/build-all.sh
 ```
 
 ## 相关文章

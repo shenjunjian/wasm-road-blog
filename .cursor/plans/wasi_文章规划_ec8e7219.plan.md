@@ -1,18 +1,18 @@
 ---
 name: WASI 文章规划
-overview: 为 blog/wasi-fundamentals.md 规划一篇独立、详尽的 WASI 长文：P1 简略带过，P2/P3 作为主体深入讲解特性、WIT API、Rust 开发流程、产物形态与 Wasmtime/jco 调用方式；配套 demo 统一放在 wasi-road-demo/ 目录；应用场景章节需列举真实开源项目案例。
+overview: 为 blog/wasi-fundamentals.md 规划一篇独立、详尽的 WASI 长文：P1 简略带过，P2 作为主体深入讲解特性、WIT API、Rust 开发流程、产物形态与 Wasmtime/jco 调用方式；P3 讲概念/API 差异但无可运行 demo（wasm32-wasip3 仅 nightly）；配套 demo 统一放在 wasi-road-demo/ 目录；应用场景章节需列举真实开源项目案例。
 todos:
   - id: demo-scaffold
     content: 搭建 wasi-road-demo/ monorepo 骨架（Cargo workspace + hosts 目录 + README）
     status: completed
   - id: demo-p1-p2
     content: 实现 wasi-road-demo/crates 下 P1 最小 demo 与 P2 Component demo，wasmtime 验证通过
-    status: pending
+    status: completed
   - id: demo-p3-jco
-    content: 实现 P3 async demo + hosts/jco 宿主调用示例
-    status: pending
+    content: 实现 P3 async demo + hosts/jco 宿主调用示例（已跳过：wasm32-wasip3 仅 nightly 提供，stable 不可用）
+    status: cancelled
   - id: write-core
-    content: 撰写核心章节：Component/WIT、P2 API、P2/P3 开发、产物调用、应用场景与开源案例
+    content: 撰写核心章节：Component/WIT、P2 API、P2 开发、P3 概念差异（无 demo）、产物调用、应用场景与开源案例
     status: pending
   - id: write-rest
     content: 补写开篇、P1 简史、运行时选型、附录与 README 索引
@@ -89,7 +89,7 @@ flowchart TB
 | 0.1 WASI 是什么 | 引用 [wasi.dev](https://wasi.dev/)：面向 Wasm 的标准系统 API 族；W3C Wasm CG 下 WASI Subgroup 维护 |
 | 0.2 三代版本对照表 | P1=0.1 Legacy / P2=0.2 Stable / P3=0.3 Stable（2026-06）；Module vs Component 二分 |
 | 0.3 核心概念预热 | Capability 沙箱、Preopen、WIT、World、Component、Canonical ABI — 术语表（后文反复使用） |
-| 0.4 本文阅读地图 | 指明 P1 从简、P2/P3 含完整开发与调用；demo 均在 `wasi-road-demo/` |
+| 0.4 本文阅读地图 | 指明 P1 从简、P2 含完整开发与调用、P3 仅概念/API 差异（无可运行 demo）；demo 均在 `wasi-road-demo/` |
 
 **关键对照表**（全文第一张表）：
 
@@ -231,13 +231,13 @@ wasi-road-demo/
   crates/
     wasi-p1-cli-demo/     # P1 最小 hello + preopen
     wasi-p2-cli-demo/     # P2 Component
-    wasi-p3-cli-demo/     # P3 async Component
+    wasi-p3-cli-demo/     # [暂缓] P3 async Component（需 nightly）
   hosts/
     jco-p2-host/          # Node + jco transpile 调用 P2
-    jco-p3-host/          # Node + preview3-shim 调用 P3
+    jco-p3-host/          # [暂缓] Node + preview3-shim 调用 P3
   data/                   # preopen 测试数据
   scripts/
-    run-p2.sh / run-p3.sh
+    run-p2.sh / run-p3.sh # run-p3.sh [暂缓]
   README.md
 ```
 
@@ -287,11 +287,11 @@ wasi-road-demo/
 
 ---
 
-### 第 7 章：P3 开发方法（Rust + demo）
+### 第 7 章：P3 开发方法（概念 + 官方命令，无本地 demo）
 
-**配套 demo**：`wasi-road-demo/crates/wasi-p3-cli-demo/` — 与 P2 demo 同功能，展示 async 写法差异
+> **Demo 决策（2026-07-06）**：`wasm32-wasip3` 目前仅 rustup **nightly Tier 3** 提供，stable target 列表中不存在；本项目 demo 仅使用 stable，故 **跳过** `wasi-p3-cli-demo` 与 `hosts/jco-p3-host`。第 7 章以官方文档命令与 WIT 片段说明为主，待 `wasm32-wasip3` 进入 stable 后再补 demo。
 
-#### 7.1 环境
+#### 7.1 环境（引用官方，本文不验证）
 ```bash
 rustup toolchain install nightly
 rustup target add wasm32-wasip3 --toolchain nightly
@@ -299,14 +299,14 @@ rustup target add wasm32-wasip3 --toolchain nightly
 
 #### 7.2 Guest 代码差异示例
 - WIT 中出现 `async func`、`stream<u8>`、`future<result<...>>`
-- Rust guest 侧 async 入口（以 demo 验证时的工具链为准，附官方 Rust 教程链接）
+- Rust guest 侧 async 入口（引用 [wasi.dev/languages](https://wasi.dev/languages) 与官方 Rust 教程，**不以本地 demo 为准**）
 
-#### 7.3 构建与运行
+#### 7.3 构建与运行（引用官方，本文不验证）
 ```bash
 cargo +nightly build --target wasm32-wasip3 --release
 wasmtime run -S preview3=y target/wasm32-wasip3/release/demo.wasm
 ```
-（具体 flag 以 demo 验证时 Wasmtime 版本为准，写入文章与 README）
+（具体 flag 以 Wasmtime 官方文档为准；**wasi-road-demo 不提供对应可运行产物**）
 
 ---
 
@@ -337,9 +337,9 @@ sequenceDiagram
 #### 8.3 JavaScript 宿主：jco（重点）
 - 安装 `@bytecodealliance/jco`
 - **P2 路径**：`jco transpile demo.wasm -o demo-js/` → Node 中 import 生成模块
-- **P3 路径**：`preview3-shim` 包；streams/futures 与 JS AsyncIterator/Promise 映射
-- 对应 demo：`wasi-road-demo/hosts/jco-p2-host/`、`jco-p3-host/`
-- 演示流程：JS 主程序加载 Component → 调用 export 函数 / 跑 CLI world
+- **P3 路径**：`preview3-shim` 包；streams/futures 与 JS AsyncIterator/Promise 映射（**仅文档说明，无 `jco-p3-host` demo**）
+- 对应 demo：`wasi-road-demo/hosts/jco-p2-host/`（P3 宿主 demo 已跳过）
+- 演示流程：JS 主程序加载 Component → 调用 export 函数 / 跑 CLI world（P2 demo 可跑通；P3 引用 jco 官方文档）
 
 #### 8.4 Component 组合与分发
 - `wasm-tools compose`：把多个 Component 链在一起
@@ -389,13 +389,22 @@ Wasmtime / Wasmer / WasmEdge / wazero / WAMR / jco — 各自 P1/P2/P3 支持程
 |------|------|
 | A. WIT 速查 | 常用类型、world 模板 |
 | B. 命令速查 | rustup / cargo / wasmtime / wasm-tools / jco 一页纸 |
-| C. 排错 | `wrong type` 版本不匹配、preopen 路径、P3 nightly 构建失败 |
+| C. 排错 | `wrong type` 版本不匹配、preopen 路径；P3 需 nightly，本文 demo 不涉及 |
 | D. demo 索引 | `wasi-road-demo/` 目录结构与各 crate/host 说明 |
 | E. 开源项目速查 | 第 1 章项目表扩展版（含 GitHub star、许可证、WASI 版本） |
 
 ---
 
 ## Demo 工程规划：wasi-road-demo/
+
+### P3 demo 暂缓决策
+
+| 项 | 结论 |
+|----|------|
+| `wasm32-wasip3` 可用性 | rustup stable **无此 target**；仅 `nightly` Tier 3 可 `rustup target add wasm32-wasip3 --toolchain nightly` |
+| 本项目策略 | **不安装 nightly**；P3 章节只写概念/API/官方命令，**不提供可运行 Rust demo** |
+| 跳过范围 | `crates/wasi-p3-cli-demo`、`hosts/jco-p3-host`、`scripts/run-p3.sh` |
+| 恢复条件 | `wasm32-wasip3` 进入 stable（或维护者主动安装 nightly 并验证通过）后，再实现任务 `demo-p3-jco` |
 
 所有 demo 统一放在仓库根目录 [wasi-road-demo/](wasi-road-demo/)，采用 **Cargo workspace + hosts 子目录** 结构：
 
@@ -409,24 +418,24 @@ wasi-road-demo/
 ├── crates/
 │   ├── wasi-p1-cli-demo/      # P1：wasm32-wasip1，hello + 读写 preopen 文件
 │   ├── wasi-p2-cli-demo/      # P2：wasm32-wasip2 Component，CLI + filesystem
-│   └── wasi-p3-cli-demo/      # P3：wasm32-wasip3 nightly，同功能 async 版
+│   └── wasi-p3-cli-demo/      # [暂缓] P3：需 nightly wasm32-wasip3
 ├── hosts/
 │   ├── jco-p2-host/           # package.json + jco transpile + 调用脚本
-│   └── jco-p3-host/           # preview3-shim 宿主（随工具链成熟度实现）
+│   └── jco-p3-host/           # [暂缓] preview3-shim 宿主
 └── scripts/
     ├── build-all.sh
     ├── run-p1.sh
     ├── run-p2.sh
-    └── run-p3.sh
+    └── run-p3.sh              # [暂缓]
 ```
 
 ### 各 demo 职责
 
-| 路径 | Target | 验证方式 |
-|------|--------|----------|
-| `crates/wasi-p1-cli-demo` | `wasm32-wasip1` | `wasmtime run` |
-| `crates/wasi-p2-cli-demo` | `wasm32-wasip2` | `wasmtime run` + `hosts/jco-p2-host` |
-| `crates/wasi-p3-cli-demo` | `wasm32-wasip3` | `wasmtime run -S preview3=y` + `hosts/jco-p3-host` |
+| 路径 | Target | 验证方式 | 状态 |
+|------|--------|----------|------|
+| `crates/wasi-p1-cli-demo` | `wasm32-wasip1` | `wasmtime run` | 已实现 |
+| `crates/wasi-p2-cli-demo` | `wasm32-wasip2` | `wasmtime run` + `hosts/jco-p2-host` | 已实现 |
+| `crates/wasi-p3-cli-demo` | `wasm32-wasip3` (nightly) | `wasmtime run -S preview3=y` + `hosts/jco-p3-host` | **暂缓** |
 
 ### 根目录 README.md 更新
 
@@ -441,16 +450,18 @@ wasi-road-demo/
 3. **P2 poll 异步流程** vs **P3 await 流程**（对比 sequence diagram）
 4. **Module vs Component** 结构图
 5. **WASI 生态三层架构**（规范 → 运行时 → 框架 → 平台）
-6. **完整命令块**：P1 / P2 cargo+wasmtime / P3 nightly / jco transpile（均来自 wasi-road-demo）
+6. **完整命令块**：P1 / P2 cargo+wasmtime / jco transpile（来自 wasi-road-demo）；P3 命令引用官方文档（无本地 demo）
 7. **WIT 片段**：P2 stdio vs P3 async stdio 并排对比
 
 ---
 
 ## 建议实施顺序
 
-1. 搭建 `wasi-road-demo/` workspace 骨架
-2. 实现并验证 `wasi-p2-cli-demo`（Wasmtime + jco 跑通）— 文章核心 demo
-3. 写第 3–5、第 8 章（P2 主干 + 调用）
-4. 实现 `wasi-p1-cli-demo`、`wasi-p3-cli-demo`，写第 2、第 6–7 章
-5. 写第 1 章（含开源项目案例）、第 9–10 章与附录
-6. 全文通读：确保 P2/P3 API 与 demo 命令一致
+1. ~~搭建 `wasi-road-demo/` workspace 骨架~~（已完成）
+2. ~~实现并验证 `wasi-p2-cli-demo`（Wasmtime + jco 跑通）~~（已完成）
+3. ~~实现 `wasi-p1-cli-demo`~~（已完成）
+4. ~~实现 `wasi-p3-cli-demo` + `jco-p3-host`~~（**已跳过**：`wasm32-wasip3` 仅 nightly，stable 不可用）
+5. 写第 3–5、第 8 章（P2 主干 + 调用）
+6. 写第 2、第 6–7 章（P3 仅概念/API，引用官方命令，无本地 demo）
+7. 写第 1 章（含开源项目案例）、第 9–10 章与附录
+8. 全文通读：确保 P2 API 与 demo 命令一致；P3 章节标注「无可运行 demo」
