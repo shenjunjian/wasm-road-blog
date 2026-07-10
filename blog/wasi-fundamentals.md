@@ -1641,7 +1641,44 @@ WASI 仍在快速演进，[wasi.dev/releases](https://wasi.dev/releases) 列出�
 | jco 仓库             | [github.com/bytecodealliance/jco](https://github.com/bytecodealliance/jco)               |
 | WASI 0.3 发布公告      | [bytecodealliance.org/articles/WASI-0.3](https://bytecodealliance.org/articles/WASI-0.3) |
 | 本文配套 demo          | [wasi-road-demo/](../wasi-road-demo/)                                                    |
+| HTTP Component 示例  | [sample-wasi-http-rust](https://github.com/bytecodealliance/sample-wasi-http-rust)        |
 | 姊妹篇：Wasm 基础        | [wasm-fundamentals.md](./wasm-fundamentals.md)                                           |
+
+
+### 10.4 生态示例：拉取并运行第三方 Component
+
+P2 生态已有通过 **OCI Registry** 分发的可运行 Component——不必自己编译，拉下来就能跑。与本文第 5 章 `wasi-p2-cli-demo`（`wasi:cli/command` world，用 `wasmtime run`）不同，HTTP 类 Component 实现 **`wasi:http/proxy`** world，需用 **`wasmtime serve`** 启动。
+
+下面以 Bytecode Alliance 官方示例 [sample-wasi-http-rust](https://github.com/bytecodealliance/sample-wasi-http-rust) 为例，演示「拉取 → 启动 → 验证」完整流程。
+
+**环境准备**（若已安装可跳过）：
+
+```bash
+curl https://wasmtime.dev/install.sh -sSf | bash   # Wasmtime 18+
+cargo install wkg                                  # OCI 拉取工具
+```
+
+**从 GHCR 拉取并运行**：
+
+```bash
+wkg oci pull ghcr.io/bytecodealliance/sample-wasi-http-rust/sample-wasi-http-rust:latest
+wasmtime serve -Scli -Shttp --addr=127.0.0.1:8080 sample-wasi-http-rust.wasm
+```
+
+**另开终端验证**：
+
+```bash
+curl http://127.0.0.1:8080/              # Hello, wasi:http/proxy world!
+curl http://127.0.0.1:8080/echo -d hi    # 回显请求体
+```
+
+该示例还内置 `/wait`、`/echo-headers` 等路由，完整列表见项目 README。查看 Component 内嵌 WIT 接口：
+
+```bash
+wasm-tools component wit sample-wasi-http-rust.wasm
+```
+
+**小结**：第三方 Component 的分发模式已成型——`wkg oci pull` 拉制品，`wasmtime serve` / `wasmtime run` 按 world 类型选择启动方式。更复杂的扩展能力（KV、出站 HTTP 等）通常需 Spin、wasmCloud 等框架注入，裸 Wasmtime 只履约标准 `wasi:*` import。
 
 
 ---
