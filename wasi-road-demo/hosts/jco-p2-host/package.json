@@ -5,8 +5,13 @@
   "type": "module",
   "description": "Node.js host: jco transpile + run wasi-p2-cli-demo Component",
   "scripts": {
-    "transpile": "echo \"TODO: jco transpile ../crates/wasi-p2-cli-demo target\"",
-    "run": "echo \"TODO: node run.js\""
+    "transpile": "jco transpile ../../target/wasm32-wasip2/release/wasi-p2-cli-demo.wasm -o ./generated",
+    "start": "node run.js",
+    "run": "node run.js",
+    "run:jco": "jco run --jco-import ./jco-import.js ../../target/wasm32-wasip2/release/wasi-p2-cli-demo.wasm"
+  },
+  "dependencies": {
+    "@bytecodealliance/preview2-shim": "^0.17.9"
   },
   "devDependencies": {
     "@bytecodealliance/jco": "^1.7.0"
