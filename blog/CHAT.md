@@ -149,83 +149,491 @@ Chat Completions 之所以难被取代，不是因为最适合 Agent，而是因
 
 ## 5. 三种接口调用示例
 
-以下示例均用 Python + 官方 `openai` SDK 风格（Responses / Open Responses 客户端可共用同一 SDK，改 `base_url` 即可）。
+以下示例均用 **JavaScript + 官方 `openai` npm 包**（Responses / Open Responses 客户端可共用同一 SDK，改 `baseURL` 即可）。每节除最小可运行代码外，还给出 **tools 定义、模型返回、回传结果** 的 JSON 形状，以及 **多轮对话** 两种续接方式：`previous_response_id`（有状态）与 `encrypted_content` 回传（无状态，详见附录 1）。
+
+```bash
+npm install openai
+```
 
 ### 5.1 Chat Completions API
 
-```python
-from openai import OpenAI
+#### 5.1.1 基础对话
 
-client = OpenAI(
-    api_key="sk-xxx",
-    # 国内模型示例：DeepSeek / 通义等兼容端点
-    # base_url="https://api.deepseek.com",
-)
+```javascript
+import OpenAI from "openai";
 
-completion = client.chat.completions.create(
-    model="gpt-4.1-mini",
-    messages=[
-        {"role": "system", "content": "你是简洁的助手。"},
-        {"role": "user", "content": "用一句话解释 REST。"},
-    ],
-)
+const client = new OpenAI({
+  apiKey: "sk-xxx",
+  // 国内模型示例：DeepSeek / 通义等兼容端点
+  // baseURL: "https://api.deepseek.com",
+});
 
-print(completion.choices[0].message.content)
+const completion = await client.chat.completions.create({
+  model: "gpt-4.1-mini",
+  messages: [
+    { role: "system", content: "你是简洁的助手。" },
+    { role: "user", content: "用一句话解释 REST。" },
+  ],
+});
+
+console.log(completion.choices[0].message.content);
 ```
+
+#### 5.1.2 自定义 Function Calling（完整往返）
+
+Chat Completions 的工具定义**嵌套**在 `function` 字段里；模型把调用挂在 `message.tool_calls[]`；客户端执行后，用 `role: "tool"` + `tool_call_id` 回传，**必须再发一次** Chat 请求。
+
+**请求中的 `tools` 定义：**
+
+```json
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "get_weather",
+      "description": "查询指定城市的当前天气",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "city": { "type": "string", "description": "城市名，如 北京" }
+        },
+        "required": ["city"]
+      }
+    }
+  }
+]
+```
+
+**第一轮响应（模型决定调工具）：**
+
+```json
+{
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [{
+        "id": "call_abc123",
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "arguments": "{\"city\":\"北京\"}"
+        }
+      }]
+    }
+  }]
+}
+```
+
+**第二轮请求（把工具结果塞回 `messages`）：**
+
+```json
+{
+  "messages": [
+    { "role": "system", "content": "你是简洁的助手。" },
+    { "role": "user", "content": "北京今天天气怎么样？" },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [{ "id": "call_abc123", "type": "function", "function": { "name": "get_weather", "arguments": "{\"city\":\"北京\"}" } }]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_abc123",
+      "content": "{\"temp\":28,\"condition\":\"晴\",\"humidity\":45}"
+    }
+  ],
+  "tools": [ "...同上..." ]
+}
+```
+
+**完整 JavaScript 循环：**
+
+```javascript
+import OpenAI from "openai";
+
+const client = new OpenAI({ apiKey: "sk-xxx" });
+
+const tools = [
+  {
+    type: "function",
+    function: {
+      name: "get_weather",
+      description: "查询指定城市的当前天气",
+      parameters: {
+        type: "object",
+        properties: {
+          city: { type: "string", description: "城市名，如 北京" },
+        },
+        required: ["city"],
+      },
+    },
+  },
+];
+
+const messages = [
+  { role: "system", content: "你是简洁的助手。" },
+  { role: "user", content: "北京今天天气怎么样？" },
+];
+
+// 第一轮：模型返回 tool_calls
+let completion = await client.chat.completions.create({
+  model: "gpt-4.1-mini",
+  messages,
+  tools,
+});
+
+const assistantMessage = completion.choices[0].message;
+messages.push(assistantMessage);
+
+// 本地执行每个 tool_call
+for (const toolCall of assistantMessage.tool_calls ?? []) {
+  const args = JSON.parse(toolCall.function.arguments);
+  const weather = { temp: 28, condition: "晴", humidity: 45 }; // 模拟 get_weather(args.city)
+  messages.push({
+    role: "tool",
+    tool_call_id: toolCall.id,
+    content: JSON.stringify(weather),
+  });
+}
+
+// 第二轮：模型基于工具结果生成终答
+completion = await client.chat.completions.create({
+  model: "gpt-4.1-mini",
+  messages,
+  tools,
+});
+
+console.log(completion.choices[0].message.content);
+// → "北京今天晴，28°C，湿度 45%。"
+```
+
+> Chat Completions **没有** `previous_response_id`；多轮对话需客户端自行维护完整 `messages[]` 历史。
 
 ### 5.2 Responses API（OpenAI）
 
-```python
-from openai import OpenAI
+#### 5.2.1 基础对话
 
-client = OpenAI(api_key="sk-xxx")
+```javascript
+import OpenAI from "openai";
 
-response = client.responses.create(
-    model="gpt-5.2",
-    instructions="你是简洁的助手。",
-    input="用一句话解释 REST。",
-    # 可选：开启联网等内置工具（服务端执行，一轮内返回终答）
-    # tools=[{"type": "web_search"}],
-)
+const client = new OpenAI({ apiKey: "sk-xxx" });
 
-print(response.output_text)
-# 多轮时可：previous_response_id=response.id
+const response = await client.responses.create({
+  model: "gpt-5.2",
+  instructions: "你是简洁的助手。",
+  input: "用一句话解释 REST。",
+  // 可选：开启联网等内置工具（服务端执行，一轮内返回终答）
+  // tools: [{ type: "web_search" }],
+});
+
+console.log(response.output_text);
 ```
+
+**响应 `output` 结构（简化）：**
+
+```json
+{
+  "id": "resp_abc123",
+  "output": [
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [{ "type": "output_text", "text": "REST 是一种基于 HTTP 的资源操作风格……" }]
+    }
+  ]
+}
+```
+
+#### 5.2.2 自定义 Function Calling（完整往返）
+
+Responses 的工具定义是**扁平**的（无外层 `function` 嵌套）；模型调用以独立 Item `function_call` 出现在 `output`；回传用 `function_call_output` Item。
+
+**请求中的 `tools` 定义（注意与 Chat 的格式差异）：**
+
+```json
+[
+  {
+    "type": "function",
+    "name": "get_weather",
+    "description": "查询指定城市的当前天气",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "city": { "type": "string", "description": "城市名，如 北京" }
+      },
+      "required": ["city"]
+    }
+  }
+]
+```
+
+**第一轮响应（`output` 中含 `function_call` Item）：**
+
+```json
+{
+  "id": "resp_xyz789",
+  "output": [
+    {
+      "type": "function_call",
+      "call_id": "call_weather_001",
+      "name": "get_weather",
+      "arguments": "{\"city\":\"北京\"}"
+    }
+  ]
+}
+```
+
+**第二轮请求（回传 `function_call_output`）：**
+
+```json
+{
+  "model": "gpt-5.2",
+  "previous_response_id": "resp_xyz789",
+  "input": [
+    {
+      "type": "function_call_output",
+      "call_id": "call_weather_001",
+      "output": "{\"temp\":28,\"condition\":\"晴\",\"humidity\":45}"
+    }
+  ]
+}
+```
+
+**完整 JavaScript 循环：**
+
+```javascript
+import OpenAI from "openai";
+
+const client = new OpenAI({ apiKey: "sk-xxx" });
+
+const tools = [
+  {
+    type: "function",
+    name: "get_weather",
+    description: "查询指定城市的当前天气",
+    parameters: {
+      type: "object",
+      properties: {
+        city: { type: "string", description: "城市名，如 北京" },
+      },
+      required: ["city"],
+    },
+  },
+];
+
+// 第一轮
+let response = await client.responses.create({
+  model: "gpt-5.2",
+  instructions: "你是简洁的助手。",
+  input: [{ type: "message", role: "user", content: "北京今天天气怎么样？" }],
+  tools,
+});
+
+// 遍历 output，处理 function_call
+const toolOutputs = [];
+for (const item of response.output) {
+  if (item.type === "function_call") {
+    const args = JSON.parse(item.arguments);
+    const weather = { temp: 28, condition: "晴", humidity: 45 }; // 模拟 get_weather(args.city)
+    toolOutputs.push({
+      type: "function_call_output",
+      call_id: item.call_id,
+      output: JSON.stringify(weather),
+    });
+  }
+}
+
+// 第二轮：previous_response_id 续接上下文，只传工具结果
+if (toolOutputs.length > 0) {
+  response = await client.responses.create({
+    model: "gpt-5.2",
+    previous_response_id: response.id,
+    input: toolOutputs,
+  });
+}
+
+console.log(response.output_text);
+// → "北京今天晴，28°C，湿度 45%。"
+```
+
+#### 5.2.3 多轮对话：有状态模式（`previous_response_id`）
+
+默认 `store: true`，OpenAI 服务端保存会话；后续轮次只需传 `previous_response_id` + 新用户消息，**不必**重发全量历史。
+
+```javascript
+import OpenAI from "openai";
+
+const client = new OpenAI({ apiKey: "sk-xxx" });
+
+// 第一轮
+const first = await client.responses.create({
+  model: "gpt-5.2",
+  instructions: "你是简洁的助手。",
+  input: [{ type: "message", role: "user", content: "我叫小明，记住我的名字。" }],
+  store: true, // 默认值，可省略
+});
+
+console.log(first.output_text);
+// → "好的，小明，我记住了。"
+
+// 第二轮：只传 ID + 新消息
+const second = await client.responses.create({
+  model: "gpt-5.2",
+  previous_response_id: first.id, // 关键：引用上一轮
+  input: [{ type: "message", role: "user", content: "我刚才说我叫什么？" }],
+});
+
+console.log(second.output_text);
+// → "你叫小明。"
+```
+
+**第二轮请求的 JSON 形状：**
+
+```json
+{
+  "model": "gpt-5.2",
+  "previous_response_id": "resp_abc123",
+  "input": [
+    { "type": "message", "role": "user", "content": "我刚才说我叫什么？" }
+  ]
+}
+```
+
+服务端自动读取 `resp_abc123` 关联的完整历史（含明文 reasoning，若模型产生）。适合不要求零数据留存的场景。
+
+#### 5.2.4 多轮对话：无状态模式（`encrypted_content` 回传）
+
+合规场景 `store: false` 时，服务端**不保存**任何会话；多轮必须靠客户端把上一轮 `output` 中的 `reasoning` Item（含 `encrypted_content`）**原样塞回** `input`。完整原理见**附录 1**。
+
+```javascript
+import OpenAI from "openai";
+
+const client = new OpenAI({ apiKey: "sk-xxx" });
+
+// ── 第一轮：开启加密 reasoning ──
+const first = await client.responses.create({
+  model: "o4-mini",
+  store: false,
+  include: ["reasoning.encrypted_content"],
+  reasoning: { effort: "high" },
+  input: [{ type: "message", role: "user", content: "解方程 2x + 5 = 17，展示步骤。" }],
+});
+
+// 从 output 中提取需要本地保存的 Items
+const reasoningItem = first.output.find((item) => item.type === "reasoning");
+const assistantMessage = first.output.find((item) => item.type === "message");
+
+console.log(first.output_text);
+
+// ── 第二轮：把加密 reasoning + 新消息一起传回 ──
+const second = await client.responses.create({
+  model: "o4-mini",
+  store: false,
+  include: ["reasoning.encrypted_content"],
+  reasoning: { effort: "high" },
+  input: [
+    // ⚠️ 必须原样回传，不可篡改 encrypted_content
+    reasoningItem,
+    assistantMessage, // 可选：带上上一轮 assistant 回复，保持对话连贯
+    { type: "message", role: "user", content: "如果 x 再减 3，结果是多少？" },
+  ],
+});
+
+console.log(second.output_text);
+```
+
+**第一轮响应中 `reasoning` Item 的形状：**
+
+```json
+{
+  "type": "reasoning",
+  "id": "rs_xxxx",
+  "encrypted_content": "gAAAAABlxxxxxx加密字符串",
+  "summary": [{ "type": "summary_text", "text": "设方程 2x+5=17，移项得 2x=12，x=6" }]
+}
+```
+
+**第二轮请求的 `input` 数组（回传 = 原样塞回）：**
+
+```json
+{
+  "model": "o4-mini",
+  "store": false,
+  "include": ["reasoning.encrypted_content"],
+  "reasoning": { "effort": "high" },
+  "input": [
+    {
+      "type": "reasoning",
+      "id": "rs_xxxx",
+      "encrypted_content": "gAAAAABlxxxxxx加密字符串",
+      "summary": [{ "type": "summary_text", "text": "设方程 2x+5=17，移项得 2x=12，x=6" }]
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [{ "type": "output_text", "text": "x = 6" }]
+    },
+    { "type": "message", "role": "user", "content": "如果 x 再减 3，结果是多少？" }
+  ]
+}
+```
+
+**两种多轮模式对比：**
+
+| | 有状态 `previous_response_id` | 无状态 `encrypted_content` 回传 |
+| --- | --- | --- |
+| `store` | `true`（默认） | `false` |
+| 客户端存什么 | 只需存 `response.id` | 需存完整 `reasoning` Item（含密文） |
+| 下一轮传什么 | `previous_response_id` + 新消息 | 密文 reasoning + 历史 Items + 新消息 |
+| 数据驻留 | OpenAI 服务端 | 零留存（ZDR 合规） |
+| 适用 | 一般 Agent / 对话 | 金融、医疗等强合规场景 |
+
+> 带工具调用的无状态多轮：除 `reasoning` 外，还需把 `function_call` / `function_call_output` Items 一并按顺序回传，逻辑与加密 reasoning 相同——**完整保留、原样塞回**。
 
 ### 5.3 Open Responses API
 
-协议形状与 Responses 高度一致；差异主要在**多厂商路由头、reasoning 字段可见性、Compliance**。示例对接 Hugging Face / 自建 Open Responses 网关：
+协议形状与 Responses 高度一致；差异主要在**多厂商路由头、reasoning 字段可见性、Compliance**。以下对接 Hugging Face / 自建 Open Responses 网关，多轮与 tools 用法同 5.2。
 
-```python
-from openai import OpenAI
+```javascript
+import OpenAI from "openai";
 
-client = OpenAI(
-    api_key="hf_xxx",  # 或网关发放的 key
-    base_url="https://your-open-responses-gateway/v1",
-)
+const client = new OpenAI({
+  apiKey: "hf_xxx",
+  baseURL: "https://your-open-responses-gateway/v1",
+  defaultHeaders: { "OpenResponses-Version": "latest" },
+});
 
-response = client.responses.create(
-    model="moonshotai/Kimi-K2-Thinking:nebius",  # 路由层模型名
-    input="用一句话解释 REST。",
-    # 部分实现要求版本头（可用 httpx 默认 headers 注入）
-    # extra_headers={"OpenResponses-Version": "latest"},
-)
+const response = await client.responses.create({
+  model: "moonshotai/Kimi-K2-Thinking:nebius",
+  input: [{ type: "message", role: "user", content: "用一句话解释 REST。" }],
+});
 
-print(response.output_text)
+console.log(response.output_text);
 ```
 
-等价的 curl：
+**带自定义工具的请求（形状与 OpenAI Responses 相同）：**
 
-```bash
-curl https://your-open-responses-gateway/v1/responses \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "OpenResponses-Version: latest" \
-  -d '{
-    "model": "zai-org/GLM-4.7",
-    "input": "用一句话解释 REST。"
-  }'
+```json
+{
+  "model": "zai-org/GLM-4.7",
+  "input": [{ "type": "message", "role": "user", "content": "查一下上海天气" }],
+  "tools": [
+    {
+      "type": "function",
+      "name": "get_weather",
+      "description": "查询城市天气",
+      "parameters": {
+        "type": "object",
+        "properties": { "city": { "type": "string" } },
+        "required": ["city"]
+      }
+    }
+  ]
+}
 ```
+
+> 经网关桥接的上游若只有 Chat Completions，tools 与多轮能力可能受限；详见第 7 节。
 
 ---
 
@@ -445,7 +853,7 @@ LiteLLM Proxy 还可在网关侧做 `previous_response_id` 会话连续、负载
 - [LiteLLM `/responses`](https://docs.litellm.ai/docs/response_api)
 - [百度千帆 Responses API 使用指南](https://cloud.baidu.com/doc/qianfan-docs/s/4mi400l1m)
 
-
+## 附录1
 
 # Responses API 加密 reasoning 回传（encrypted reasoning items）完整解释
 ## 一、核心定义
@@ -525,6 +933,7 @@ OpenAI服务器收到密文后：
 ## 六、一句话通俗总结
 加密reasoning回传 = 不让OpenAI服务器存你的模型思考过程，模型把完整思考打包加密发给你，你本地存密文，下一轮对话再把密文原样传回服务器，服务器临时解密复用之前的思考，用完立刻删掉，全程不落地存储、满足隐私合规。
 
+## 附录2
 
 # 并行 n 路采样（Parallel N-way Sampling / Best-of-N Parallel Sampling）
 ## 一句话定义
