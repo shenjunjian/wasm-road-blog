@@ -13,7 +13,7 @@
 | 输入模型 | `messages[]`（role + content） | `input`（字符串或 typed Items） | 同 Responses：Items 为原子单位 |
 | 输出模型 | `choices[].message` | `output[]`（message / reasoning / function_call / …） | 同 Responses，流式为语义事件 |
 | 会话状态 | 客户端自行拼全量 history | 服务端可 `store` + `previous_response_id` | 默认可无状态；支持加密 reasoning 回传 |
-| 自定义 Function Calling | ✅ | ✅ | ✅ |
+| 自定义 Function Calling | ✅（嵌套 `tools[].function`） | ✅（扁平 `tools[]` + Item） | ✅（同 Responses） |
 | **服务端 Agent 循环**（一轮内多工具并直接出终答） | ❌（工具结果需再发一轮） | ✅（内置工具可在同请求内执行完） | ✅（规范正式化 sub-agent loop） |
 | 内置托管工具 | ❌ | web_search / file_search / code_interpreter / computer_use / image_generation / MCP / shell 等 | 分 **internal**（厂商托管）与 **external**（客户端/MCP） |
 | Reasoning 体验 | 有限；部分模型在 Chat 上能力弱于 Responses | 原生更好（推理缓存、跨轮保留） | 规范化 `content` / `encrypted_content` / `summary` |
@@ -23,6 +23,17 @@
 | **典型原生支持** | OpenAI、Azure、Anthropic（兼容层）、Gemini、DeepSeek、通义、智谱、Kimi、绝大多数国内 API | **OpenAI / Azure OpenAI** 原生最完整；百度千帆等国内云已提供兼容实现 | Hugging Face Inference Providers、Databricks Open Responses、部分网关/代理；厂商原生逐步跟进 |
 | **经网关桥接后** | — | LiteLLM、各类聚合网关可将 Chat 上游映射为 `/v1/responses` | 同左；Open Responses Compliance 可验收 |
 
+**Function Calling 格式差异（简述）：**
+
+| | Chat Completions | Responses / Open Responses |
+| --- | --- | --- |
+| 工具定义 | 外层嵌套：`{"type":"function","function":{"name","parameters",…}}` | 扁平：`{"type":"function","name","parameters",…}` |
+| 模型调用 | 挂在 `message.tool_calls[]`（`id` + `function.name/arguments`） | 独立 Item：`output` 中的 `function_call`（`call_id` + `name`/`arguments`） |
+| 回传结果 | `messages` 里 `role:"tool"` + `tool_call_id` | `input` 里 `function_call_output` + `call_id` |
+| strict | 默认非 strict | 省略 `strict` 时倾向 strict；要非 strict 需显式 `strict:false` |
+
+能力都支持自定义函数；差别主要在**字段形状与回传载体**，不是「能不能调工具」。
+ 
 **一句话选型：**
 
 - 只要「发消息 → 拿文本」且生态兼容优先 → **Chat Completions** 仍最稳。
@@ -55,7 +66,7 @@ OpenAI 官方建议：**新项目默认用 Responses**；存量 Chat 可渐进�
 
 ### 2.3 Open Responses：把 Responses「开放成标准」（2026-01）
 
-Chat Completions 之所以难被取代，不是因为最适合 Agent，而是因为**互操作性**。Responses 能力更强，却一度偏「OpenAI 专有」。
+Chat Completions 之所以难被取代，不是因为最适合 Agent，而是因为**互操作性**。Responses 能力更强，却一度偏「OpenAI 专有，是闭源的，但是抄作业谁不会呢。
 
 2026 年 1 月，社区发布 **Open Responses**（[openresponses.org](https://www.openresponses.org/)）：由 OpenAI 发起方向、开源社区共建、Hugging Face 等生态背书。它：
 
@@ -115,20 +126,24 @@ Chat Completions 之所以难被取代，不是因为最适合 Agent，而是因
 
 ### 4.2 国内
 
-| 厂商 / 平台 | Chat Completions | Responses 兼容 | Open Responses |
+> **先分清：** 国内文档写的「支持 Responses」几乎都是 **OpenAI Responses 兼容**（`/responses`、`input`/`output` Items、官方 OpenAI SDK），**不是** Open Responses 开源规范，也鲜少宣称 Compliance。
+
+| 厂商 / 平台 | Chat Completions | Responses（OpenAI 形）兼容 | Open Responses |
 | --- | --- | --- | --- |
-| DeepSeek 官方 | ✅ 主力 | 官方偏 Chat；经千帆/聚合网关可走 Responses | 多为网关层 |
-| 通义千问 / 阿里云百炼 | ✅ | 部分云与聚合网关兼容 `/v1/responses` | 少见原生，靠网关 |
+| DeepSeek 官方 | ✅ 主力 | 官方偏 Chat；经千帆/聚合网关可走 | 多为网关层 |
+| 通义千问 / 阿里云百炼 | ✅ | ✅ 官方「OpenAI 兼容-Responses」（如 `/compatible-mode/v1/responses`）；`previous_response_id`、内置工具等；未文档参数常被忽略（子集） | ❌ 非该规范 |
+| 火山引擎 / 方舟（豆包） | ✅ | ✅ 官方 Responses（如 `/api/v3/responses`）；上下文缓存、多模态、工具调用 | ❌ 非该规范 |
+| 腾讯混元 / TokenHub | ✅ | ✅ 部分模型（如 `hy3`）兼容 OpenAI Responses；旧型号多仅 Chat | ❌ 非该规范 |
+| 百度智能云千帆 | ✅ | ✅ 官方 Responses（`/v2/responses`）；`previous_response_id`、MCP、知识检索等 | 未明确 Compliance |
 | 智谱 GLM | ✅ | 聚合网关常见 | 靠网关 |
-| 月之暗面 Kimi | ✅ | 聚合网关常见 | HF 演示曾用 Kimi 走 Open Responses 路由 |
-| 百度智能云千帆 | ✅ Chat API | ✅ **官方 Responses API**（`/v2/responses`），支持 `previous_response_id`、MCP、内置知识检索等 | 接近 Responses 能力，是否标 Open Responses Compliance 需看版本 |
-| 各类 API 聚合网关 | ✅ | 常同时暴露 `/v1/chat/completions` 与 `/v1/responses` | 少数宣称对齐 |
+| 月之暗面 Kimi | ✅ | 聚合网关常见 | HF 等路由层偶见 |
+| 各类 API 聚合网关 | ✅ | 常同时暴露 Chat 与 `/responses` | 少数宣称对齐 |
 
 **现状结论：**
 
 1. **Chat Completions** 仍是国内模型与本地部署的「最大公约数」。
-2. **Responses** 在 OpenAI 最完整；国内以**百度千帆**等云厂商与聚合网关跟进较快。
-3. **Open Responses** 更多出现在**国际路由层 / 云平台 / 开源网关**；国内应用侧常见路径是：客户端说 Open Responses / Responses，网关翻译成上游 Chat Completions。
+2. 通义、火山、混元、千帆等已陆续提供 **OpenAI Responses 兼容端点**，能力多为子集，参数与行为以各家文档为准。
+3. **Open Responses** 仍主要在国际路由层 / 开源网关；国内「支持 Responses」≠ 宣称 Open Responses。
 
 ---
 
@@ -325,6 +340,9 @@ model_list:
 
   # 或写成模型名前缀：
   # model: openai/chat_completions/my-qwen
+# 开启 Responses 协议兼容端点
+general_settings:
+  enable_responses_api: true
 ```
 
 启动：
@@ -426,3 +444,162 @@ LiteLLM Proxy 还可在网关侧做 `previous_response_id` 会话连续、负载
 - [Open Responses 规范](https://www.openresponses.org/specification) / [Hugging Face: Open Responses](https://huggingface.co/blog/open-responses)
 - [LiteLLM `/responses`](https://docs.litellm.ai/docs/response_api)
 - [百度千帆 Responses API 使用指南](https://cloud.baidu.com/doc/qianfan-docs/s/4mi400l1m)
+
+
+
+# Responses API 加密 reasoning 回传（encrypted reasoning items）完整解释
+## 一、核心定义
+**加密 reasoning 回传** = 模型中间思考链（CoT推理过程）不以明文返回，而是返回一段**加密字符串 encrypted_content**；你拿到后完整原样塞到下一轮请求 `input` 里传给OpenAI后端，后端才能解密复用之前的完整推理上下文，实现多轮连续思考。
+专门解决**零数据留存ZDR、无状态（store=false）** 企业合规场景，是OpenAI给o3/o4-mini等推理模型的隐私特性。
+
+## 二、先分清两种对话模式（关键背景）
+### 1）有状态模式（默认 store=true，不用加密推理）
+- 调用时传 `previous_response_id`，OpenAI服务器保存完整会话+明文推理记录；
+- 下一轮直接引用ID，后端自动读取历史思考；
+- 缺点：数据存在OpenAI服务器，**医疗/金融/合规客户不能用**。
+
+### 2）无状态模式（store=false，必须用加密推理）
+合规要求：**零数据留存ZDR**，OpenAI禁止持久化任何会话、推理中间内容，服务器不能存历史。
+问题：多轮Agent、工具调用时模型需要复用上一轮的思考逻辑，否则思考断裂、回答质量暴跌。
+解决方案：**encrypted_content 加密推理回传**。
+
+## 三、加密推理完整工作流程（回传是什么意思）
+### 步骤1：首次请求开启加密推理
+请求参数增加：
+```json
+{
+  "model": "o4-mini",
+  "store": false, // 强制无状态，ZDR场景自动生效
+  "include": ["reasoning.encrypted_content"], // 开启返回加密推理
+  "reasoning": {"effort": "high"},
+  "input": [{"type":"message","role":"user","content":"复杂数学题"}]
+}
+```
+
+### 步骤2：API返回加密推理对象
+响应output里会出现一段加密串，**你看不到原始思考明文**：
+```json
+{
+  "type": "reasoning",
+  "id": "rs_xxxx",
+  "encrypted_content": "gAAAAABlxxxxxx加密字符串", // 核心密文
+  "summary": [{"type":"summary_text","text":"人类可读极简思考摘要"}]
+}
+```
+- `encrypted_content`：加密后的完整推理token链，只有同组织API密钥能解密；
+- `summary`：仅给开发者看的简化摘要，**模型不依赖这个做连续思考**。
+
+### 步骤3：「回传」= 下一轮请求原样塞回input
+这就是**回传**的含义：你本地存储这段加密推理对象，新用户提问时，把上一轮完整reasoning对象（含encrypted_content）放进新请求的`input`数组传给API：
+```json
+"input": [
+  // 上一轮加密推理对象完整原样带回
+  {"type":"reasoning","id":"rs_xxxx","encrypted_content":"gAAAAABlxxxx","summary":[...]},
+  // 新用户消息
+  {"type":"message","role":"user","content":"追问下一题"}
+]
+```
+
+### 步骤4：后端解密使用，不留存
+OpenAI服务器收到密文后：
+1. 内存中临时解密完整推理链；
+2. 结合历史思考执行新一轮推理；
+3. **解密后的明文绝不落地磁盘**，请求结束立刻销毁；
+4. 新一轮思考再次加密成新encrypted_content返回给你，全程无持久存储。
+
+## 四、核心特性与约束
+1. **绑定组织密钥**
+   密文由你的组织API密钥加密，换不同API Key、不同租户无法解密，跨部署负载均衡会报错`invalid_encrypted_content`。
+2. **客户端完全不可读原始推理**
+   你只能看到summary摘要，无法逆向解析encrypted_content拿到完整CoT，OpenAI保护内部推理逻辑隐私。
+3. 必须完整回传，不能篡改
+   修改、截断encrypted_content会直接返回参数错误；必须原封不动传给下一轮。
+4. 仅适配Responses API，旧Chat Completions不支持
+   `/v1/chat/completions`没有该能力，只有新Agent专用Responses API提供。
+
+## 五、适用场景
+1. 强合规行业：金融、医疗、政务，要求ZDR零数据留存，禁止服务商存储会话；
+2. 私有化/本地数据合规：用户敏感数据不能第三方持久化；
+3. 多轮复杂Agent、工具循环调用：需要连贯思考但不能用stateful会话。
+
+## 六、一句话通俗总结
+加密reasoning回传 = 不让OpenAI服务器存你的模型思考过程，模型把完整思考打包加密发给你，你本地存密文，下一轮对话再把密文原样传回服务器，服务器临时解密复用之前的思考，用完立刻删掉，全程不落地存储、满足隐私合规。
+
+
+# 并行 n 路采样（Parallel N-way Sampling / Best-of-N Parallel Sampling）
+## 一句话定义
+针对同一个用户输入，**同时并行跑 N 条完全独立的推理生成链路**，一次性产出 N 份完整答案/推理链，再通过投票、打分、模型筛选选出最优一条；区别于串行依次生成 N 次。
+行业也常叫 **Best-of-N 并行采样、多路并行推理采样**，是大模型「测试时缩放（Test-Time Scaling）」最主流方案，搭配你前面问的 Responses API 加密 reasoning 高频使用。
+
+## 一、核心原理拆解
+### 1. 基础对比：串行 vs 并行 n 路
+假设 n=4，一道数学题：
+- **串行采样**：生成第1条完整答案 → 等结束再生成第2条……总耗时≈4×单次推理时延
+- **并行 n 路采样**：GPU/API 侧同时启动4条独立生成流，4条推理同步跑，总时延≈单次推理时延，算力一次性拉满
+
+每条路径互相独立：
+每条路径都从原始 prompt 从头采样，温度、随机种子互不干扰，会产出不同思路、不同解法、不同结论的推理过程（CoT / reasoning）。
+
+### 2. 完整三阶段流程
+1. **并行多路生成（核心）**
+输入固定问题，同时启动 N 路独立自回归采样，产出 N 套完整 `prompt + reasoning + answer`。
+搭配 Responses API 加密 reasoning 时：每一路都会返回独立 `encrypted_content` 加密推理串。
+
+2. **候选聚合筛选（必做步骤）**
+拿到 N 条并行结果后二选一聚合：
+- 多数投票（Majority Vote）：数学、客观题最常用，选出现最多的答案；
+- 打分器/校验模型（Verifier）：用小模型逐路评判逻辑严谨度、步骤对错，挑最高分推理；
+- 融合式解码（ThinkMerge）：不丢弃多路，每一步合并多路 token 概率，生成单条更强连贯输出。
+
+3. **输出最优结果**
+把筛选后的最优推理/答案返回用户；若需要多轮对话，把对应那条的加密 reasoning 回传给下一轮请求。
+
+## 二、两种容易混淆的“并行采样”，区分清楚
+### 场景A：业务侧多路并行（你问的并行 n 路采样，推理增强用）
+目标：**提升答案正确率**，牺牲算力换精度
+- 同一请求，N 条完整独立推理链路；
+- 每条都生成完整长思考链（reasoning）；
+- 适用：数学、代码、复杂Agent、合规强推理场景；
+- 对应 API：OpenAI Responses API 支持批量并行采样 + encrypted reasoning。
+
+### 场景B：引擎内部并行Token采样（vLLM/Medusa加速用）
+目标：**加速生成速度**，不提升答案质量
+- 单条推理流，每一步并行预测多个后续 token；
+- 不产生多条独立思考路径；
+- 属于底层解码加速，和“n路并行推理”不是一回事。
+
+## 三、和加密 reasoning 的搭配（结合你上一个问题）
+无状态模式 `store=false` + 并行 n 路采样标准流程：
+1. 请求开启 `include: ["reasoning.encrypted_content"]`，设置并行采样路数 N；
+2. API 并行返回 N 组独立结果，每组自带专属 `encrypted_content` 加密推理；
+3. 本地对比 N 条候选，选出逻辑最优的那一条；
+4. 下一轮追问时，**只把最优那条的 encrypted reasoning 原样回传**到 input；
+5. OpenAI 后端临时解密该路推理上下文，复用思路继续思考，全程不存储明文推理。
+
+优势：
+- 零数据留存合规（ZDR）；
+- 并行多路大幅降低单条推理出错概率；
+- 不用存大量会话ID，本地只保管选中的密文推理。
+
+## 四、关键优缺点
+### 优点
+1. **显著提升推理准确率**
+单条采样容易思路跑偏、计算失误；多路并行后通过投票/校验过滤错误，MATH、GPQA 等难题 pass@N 大幅上涨。
+2. **时延可控**
+并行执行而非串行，N=5、N=8 时延几乎和单次生成持平，不会线性变慢。
+3. 兼容隐私加密推理
+每条路径推理独立加密，只保留最优一条密文，存储成本可控。
+
+### 缺点
+1. Token/费用翻倍：生成 N 份完整输出，输入输出 token 量≈N倍；
+2. GPU/API 并发压力更高，需要充足并发配额；
+3. 筛选逻辑增加开发成本（投票、校验模型、解析答案）。
+
+## 五、典型使用场景
+1. 数学竞赛、奥数、复杂计算题：并行多条解法，投票选正确答案；
+2. 代码生成、算法题：多路生成不同实现，过滤bug最多的版本；
+3. 金融/医疗合规Agent：无状态ZDR场景，并行推理校验逻辑严谨性；
+4. 深度研究、多步骤工具调用：多条思考路径覆盖不同检索/工具分支。
+
+## 六、极简总结
+并行 n 路采样 = 一道题同时开 N 个独立“思考分身”并行解题，一次性拿到 N 套完整推理，再择优输出；搭配 Responses API 加密 reasoning 可在不存储模型思考明文的前提下，用多路并行大幅提升复杂推理正确率。
