@@ -12,7 +12,7 @@
 | 端点 | `POST /v1/chat/completions` | `POST /v1/responses` | `POST /v1/responses`（同形，多厂商互通） |
 | 输入模型 | `messages[]`（role + content） | `input`（字符串或 typed Items） | 同 Responses：Items 为原子单位 |
 | 输出模型 | `choices[].message` | `output[]`（message / reasoning / function_call / …） | 同 Responses，流式为语义事件 |
-| 会话状态 | 客户端自行拼全量 history | 服务端可 `store` + `previous_response_id` | 默认可无状态；支持加密 reasoning 回传 |
+| 会话状态 | 客户端自行拼全量 history | 服务端可 `store` + `previous_response_id` | 规范不强制服务端存状态；实现方可支持 `store` / 加密 reasoning 回传 |
 | 自定义 Function Calling | ✅（嵌套 `tools[].function`） | ✅（扁平 `tools[]` + Item） | ✅（同 Responses） |
 | **服务端 Agent 循环**（一轮内多工具并直接出终答） | ❌（工具结果需再发一轮） | ✅（内置工具可在同请求内执行完） | ✅（规范正式化 sub-agent loop） |
 | 内置托管工具 | ❌ | web_search / file_search / code_interpreter / computer_use / image_generation / MCP / shell 等 | 分 **internal**（厂商托管）与 **external**（客户端/MCP） |
@@ -20,7 +20,7 @@
 | Structured Outputs | `response_format` | `text.format` | 规范对齐 Responses |
 | 并行 `n` 路采样 | ✅（`n`） | ❌（单次一条生成） | ❌ |
 | 定位 | 对话时代的事实标准，生态最广 | OpenAI 新项目推荐默认；接棒 Assistants | 跨厂商开放标准，面向 Agent / 路由层 |
-| **典型原生支持** | OpenAI、Azure、Anthropic（兼容层）、Gemini、DeepSeek、通义、智谱、Kimi、绝大多数国内 API | **OpenAI / Azure OpenAI** 最完整；百度千帆等国内云已有兼容实现 | Hugging Face Inference Providers、Databricks Open Responses、部分网关/代理 |
+| **典型原生支持** | OpenAI、Azure、Gemini、DeepSeek、通义、智谱、Kimi、绝大多数国内 API；Anthropic 为 Messages API（非原生 Chat，经网关兼容） | **OpenAI / Azure OpenAI** 最完整；百度千帆等国内云已有兼容实现 | Hugging Face Inference Providers、Databricks Open Responses、部分网关/代理 |
 | **经网关桥接后** | — | LiteLLM 等可将 Chat 上游映射为 `/v1/responses` | 同左；Open Responses Compliance 可验收 |
 
 **术语速览（读表用）：**
@@ -30,7 +30,7 @@
 - **Internal vs external 工具**：internal = 厂商托管（如 web_search），客户端看不到中间往返；external = 客户端函数或外部 MCP，需回填 `function_call_output`。
 - **Reasoning 体验**：推理模型（如 o 系列）的中间思考链如何暴露、缓存、跨轮复用。Responses 可保留 reasoning Item、支持加密回传；Chat 上往往能力更弱或字段更散。
 - **Structured Outputs**：强制模型输出符合 JSON Schema 的结构（工具参数或最终 JSON），减少「看起来像 JSON、实际解析失败」。
-- **`strict`**：Function Calling / Structured Outputs 的严格模式。开启后参数必须**精确匹配** schema（类型、必填字段等）。Chat 默认非 strict；Responses / Open Responses 省略 `strict` 时倾向 strict，非 strict 需显式 `strict: false`。
+- **`strict`**：Function Calling / Structured Outputs 的严格模式。开启后参数必须**精确匹配** schema（类型、必填字段等）。Chat 默认非 strict；Responses / Open Responses 省略 `strict` 时会**尝试**规范化成 strict，若 schema 无法兼容则回退 best-effort 并在响应中返回 `strict: false`；要显式非 strict 需设 `strict: false`。
 - **并行 `n` 路采样（Best-of-N）**：同一输入并行跑 N 条独立生成，再投票/打分选最优。Chat 用参数 `n`；Responses 已移除，需客户端自行并发多次请求。注意与引擎内部「并行预测下一 token」（vLLM/Medusa 加速）不是一回事——后者只加速，不产出多条完整答案。
 - **加密 reasoning 回传**：`store: false`（零数据留存 / ZDR）时，服务端不存会话；客户端把上一轮 `encrypted_content` **原样**塞回下一轮 `input`，后端临时解密续写思考。详见 5.2.4。
 
@@ -41,7 +41,7 @@
 | 工具定义 | 嵌套：`{"type":"function","function":{…}}` | 扁平：`{"type":"function","name",…}` |
 | 模型调用 | `message.tool_calls[]` | `output` 中的 `function_call` Item |
 | 回传结果 | `role:"tool"` + `tool_call_id` | `function_call_output` + `call_id` |
-| strict | 默认非 strict | 省略时倾向 strict；非 strict 需 `strict:false` |
+| strict | 默认非 strict | 省略时尝试 strict，无法兼容则回退；非 strict 需 `strict:false` |
 
 能力都支持自定义函数；差别在**字段形状与回传载体**，不是「能不能调工具」。
 
@@ -63,7 +63,7 @@ OpenAI 在 ChatGPT 走红后推出 `/v1/chat/completions`，用 `system / user /
 
 ### 2.2 Responses API：面向 Agent 的「新一等公民」（2025-03）
 
-2025-03 OpenAI 发布 Responses，定位为 Chat Completions 的演进，并逐步承接 Assistants（Assistants 计划 2026-08-26 日落）。要点：
+2025-03 OpenAI 发布 Responses，定位为 Chat Completions 的演进，并逐步承接 Assistants（Assistants API 于 2025-08-26 宣布弃用，2026-08-26 正式关停）。要点：
 
 1. **Items 而非臃肿 Message**：`function_call`、`reasoning` 等独立，便于流式与可观测；
 2. **服务端状态**：`store` + `previous_response_id`，减轻拼历史负担，提升 prompt cache 命中；
@@ -374,7 +374,9 @@ console.log(response.output_text);
 }
 ```
 
-**第二轮（回传工具结果）：**
+**第二轮（回传工具结果，有状态）：**
+
+使用 `previous_response_id` 时，服务端已存上一轮上下文，通常**只传** `function_call_output` 即可：
 
 ```json
 {
@@ -389,6 +391,8 @@ console.log(response.output_text);
   ]
 }
 ```
+
+**无 `previous_response_id`（如 `store: false`）时**，须把 `function_call` 与其 `function_call_output` **按序相邻**放入 `input`（`call_id` 对应）；若同轮还有 `reasoning` Item，也要一并带回。
 
 **完整循环：**
 
@@ -443,6 +447,8 @@ if (toolOutputs.length > 0) {
 console.log(response.output_text);
 ```
 
+> 使用**推理模型**（o 系列 / 带 reasoning 的 gpt-5.x）做工具回调时，除 `function_call_output` 外，还须把同轮返回的 `reasoning` Item 一并带回（有状态时 `previous_response_id` 可代劳；无状态须手动 replay 完整 `output`）。
+
 #### 5.2.3 多轮：有状态（`previous_response_id`）
 
 默认 `store: true`，服务端保存会话；后续只传 `previous_response_id` + 新消息，不必重发全量历史。
@@ -489,15 +495,18 @@ import OpenAI from "openai";
 const client = new OpenAI({ apiKey: "sk-xxx" });
 
 const first = await client.responses.create({
-  model: "o4-mini",
+  model: "o4-mini", // 须为支持 reasoning + encrypted_content 的模型
   store: false,
   include: ["reasoning.encrypted_content"],
   reasoning: { effort: "high" },
   input: [{ type: "message", role: "user", content: "解方程 2x + 5 = 17，展示步骤。" }],
 });
 
-const reasoningItem = first.output.find((item) => item.type === "reasoning");
-const assistantMessage = first.output.find((item) => item.type === "message");
+// 官方推荐：完整 replay 上一轮 output（含 reasoning、message、function_call 等），不可截断或改写
+const history = [
+  { type: "message", role: "user", content: "解方程 2x + 5 = 17，展示步骤。" },
+  ...first.output,
+];
 
 const second = await client.responses.create({
   model: "o4-mini",
@@ -505,8 +514,7 @@ const second = await client.responses.create({
   include: ["reasoning.encrypted_content"],
   reasoning: { effort: "high" },
   input: [
-    reasoningItem, // 必须原样回传，不可改 encrypted_content
-    assistantMessage,
+    ...history,
     { type: "message", role: "user", content: "如果 x 再减 3，结果是多少？" },
   ],
 });
@@ -532,8 +540,8 @@ console.log(second.output_text);
 | | 有状态 `previous_response_id` | 无状态 `encrypted_content` 回传 |
 | --- | --- | --- |
 | `store` | `true`（默认） | `false` |
-| 客户端存什么 | `response.id` | 完整 `reasoning` Item（含密文） |
-| 下一轮传什么 | ID + 新消息 | 密文 reasoning + 历史 Items + 新消息 |
+| 客户端存什么 | `response.id` | 完整上一轮 `output[]`（含 reasoning 密文等） |
+| 下一轮传什么 | ID + 新消息 | 完整 replay `output` + 新消息 |
 | 数据驻留 | OpenAI 服务端 | 零留存（ZDR） |
 | 适用 | 一般 Agent / 对话 | 金融、医疗等强合规 |
 
@@ -601,6 +609,8 @@ console.log(response.output_text);
 
 Open Responses：internal = 厂商托管，客户端看不到中间往返；external = 客户端函数或外部 MCP，需回填 `function_call_output`。可用 `max_tool_calls`、`tool_choice` 约束。
 
+> 混用**内置工具**与自定义 function 时，OpenAI 侧不支持 parallel function calling（内置工具路径下模型不会并行调多个自定义 function）。
+
 ### 6.2 同一轮：Responses 可调完多工具再返回；Chat 必须再开一轮
 
 **Responses（托管工具）——一次 HTTP，服务端完成循环：**
@@ -631,9 +641,9 @@ Client                         Provider
   |<--- final assistant message -|
 ```
 
-即便第一轮并行给出多个 `tool_calls`，执行结果也无法在同一轮响应里被模型消费。Responses 把这段循环上移到服务端（至少对托管工具如此）。
+即便第一轮并行给出多个 `tool_calls`，执行结果也无法在同一轮响应里被模型消费。Responses 把这段循环上移到服务端（**托管工具 / 远程 MCP** 路径如此）。
 
-> **注意：** 纯自定义 function 仍可能需客户端回传 `function_call_output`；但 Item 模型更适合多步状态，托管工具路径显著减少往返。Open Responses 把 sub-agent loop 写进规范，并用 `max_tool_calls` 等统一控制。
+> **注意：** **自定义 function** 的执行仍在客户端，须额外 HTTP 往返回传 `function_call_output`（或用 SDK / Agents 框架代跑 loop）。OpenAI 文档里「一轮内多工具」主要指托管工具与远程 MCP，而非客户端自定义函数。Item 模型更适合多步状态；Open Responses 把 sub-agent loop 写进规范，并用 `max_tool_calls` 等统一控制。
 
 ---
 
@@ -668,14 +678,11 @@ model_list:
       api_key: fake-key
       use_chat_completions_api: true   # /responses → Chat
       # 或：model: openai/chat_completions/my-qwen
-
-general_settings:
-  enable_responses_api: true
 ```
 
 ```bash
 litellm --config config.yaml
-# http://0.0.0.0:4000
+# Proxy 默认暴露 http://0.0.0.0:4000/v1/responses，无需额外开关
 ```
 
 ```python
