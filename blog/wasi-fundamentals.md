@@ -1375,8 +1375,6 @@ wasmtime run -S preview3=y target/wasm32-wasip3/release/demo.wasm
 
 ---
 
-
-
 ## 第 8 章：WASI 产物的调用方式
 
 编译出 `.wasm` Component 之后，**谁加载、如何传 capability**？本章回答这一问题。
@@ -1392,10 +1390,6 @@ sequenceDiagram
   Engine->>Host: 返回结果 / HTTP 响应
 ```
 
-
-
-
-
 ### 8.1 Wasmtime CLI（最快验证）
 
 P2 demo 验证命令：
@@ -1409,7 +1403,6 @@ wasmtime run --dir=./data::/data --env WASI_DEMO=p2 \
 ```
 
 P2 vs P3 flag 差异：
-
 
 | 场景  | P2                      | P3                                    |
 | --- | ----------------------- | ------------------------------------- |
@@ -1504,11 +1497,7 @@ spin registry push ghcr.io/your-org/your-app
 
 ---
 
-
-
 ## 第 9 章：运行时选型与生态地图
-
-
 
 ### 9.1 运行时矩阵
 
@@ -1550,7 +1539,6 @@ spin registry push ghcr.io/your-org/your-app
     └─→ 评估 P3 + Wasmtime 43+（注意 nightly target）
 ```
 
-
 | 场景                    | 推荐组合                           | WASI 版本               |
 | --------------------- | ------------------------------ | --------------------- |
 | 本地开发验证                | `cargo build` + `wasmtime run` | P2                    |
@@ -1559,9 +1547,6 @@ spin registry push ghcr.io/your-org/your-app
 | 服务网格过滤器               | proxy-wasm + Envoy             | Wasm 沙箱（非完整 WASI CLI） |
 | 分布式组件                 | wasmCloud lattice              | P2 capability 模型      |
 | 浏览器/Node 加载 Component | jco transpile                  | P2                    |
-
-
-
 
 ### 9.3 框架 vs 运行时 vs 平台
 
@@ -1575,9 +1560,6 @@ flowchart TB
   PF["托管平台\nFermyon Cloud / Fastly / Cloudflare / Akamai"]
   Spec --> RT --> FW --> PF
 ```
-
-
-
 
 | 层级      | 职责                                   | 例子                                |
 | ------- | ------------------------------------ | --------------------------------- |
@@ -1593,23 +1575,15 @@ flowchart TB
 
 ---
 
-
-
 ## 第 10 章：总结与路线图
 
-
-
 ### 10.1 三代一句话总结
-
 
 | 版本           | 一句话                                                        |
 | ------------ | ---------------------------------------------------------- |
 | **P1 (0.1)** | POSIX 风格 syscall + Core Module，Legacy 但部署广泛                |
 | **P2 (0.2)** | Component Model + WIT + poll 异步，**当前生产默认**                 |
 | **P3 (0.3)** | 原生 `async func` + `stream`/`future`，删除 `wasi:io`，IO 编程模型质变 |
-
-
-
 
 ### 10.2 活跃提案展望
 
@@ -1626,11 +1600,7 @@ WASI 仍在快速演进，[wasi.dev/releases](https://wasi.dev/releases) 列出�
 | **SQL**             | 数据库访问         | 提案阶段                     |
 | **Blob / Registry** | 大对象存储与 OCI 分发 | wkg、Spin 3.0 OCI         |
 
-
-
-
 ### 10.3 延伸阅读
-
 
 | 资源                 | 链接                                                                                       |
 | ------------------ | ---------------------------------------------------------------------------------------- |
@@ -1679,15 +1649,9 @@ wasm-tools component wit sample-wasi-http-rust.wasm
 ```
 
 **小结**：第三方 Component 的分发模式已成型——`wkg oci pull` 拉制品，`wasmtime serve` / `wasmtime run` 按 world 类型选择启动方式。更复杂的扩展能力（KV、出站 HTTP 等）通常需 Spin、wasmCloud 等框架注入，裸 Wasmtime 只履约标准 `wasi:*` import。
-
-
 ---
 
-
-
 ## 附录 A：WIT 速查
-
-
 
 ### 常用类型
 
@@ -1704,9 +1668,6 @@ wasm-tools component wit sample-wasi-http-rust.wasm
 | `resource`           | 线性句柄      | `resource pollable`              | P3 减少                    |
 | `stream<T>`          | 字节/数据流    | 经 `wasi:io` resource 间接使用        | `stream<u8>` 原生          |
 | `future<T>`          | 异步结果      | 经 poll 间接模拟                      | `future<result<...>>` 原生 |
-
-
-
 
 ### World 模板
 
@@ -1729,13 +1690,7 @@ world http-proxy {
 }
 ```
 
----
-
-
-
 ## 附录 B：命令速查
-
-
 
 ### Rust target
 
@@ -1744,8 +1699,6 @@ rustup target add wasm32-wasip1      # P1
 rustup target add wasm32-wasip2      # P2（stable）
 rustup target add wasm32-wasip3 --toolchain nightly  # P3
 ```
-
-
 
 ### 构建
 
@@ -1760,8 +1713,6 @@ cargo build --target wasm32-wasip2 --release -p wasi-p2-cli-demo
 cargo +nightly build --target wasm32-wasip3 --release
 ```
 
-
-
 ### Wasmtime 运行
 
 ```bash
@@ -1772,8 +1723,6 @@ wasmtime run --dir=./data::/data --env KEY=VAL app.wasm -- arg1 arg2
 wasmtime run -S preview3=y app.wasm
 ```
 
-
-
 ### wasm-tools
 
 ```bash
@@ -1783,8 +1732,6 @@ wasm-tools component new mod.wasm -o app.component.wasm
 wasm-tools compose -d a.wasm -d b.wasm -o composed.wasm
 ```
 
-
-
 ### jco（P2）
 
 ```bash
@@ -1793,11 +1740,7 @@ npx jco transpile app.wasm -o ./generated
 
 ---
 
-
-
 ## 附录 C：常见问题与排错
-
-
 
 ### `wrong type` / 实例化失败
 
@@ -1809,8 +1752,6 @@ npx jco transpile app.wasm -o ./generated
 2. 确保 `wasi` crate / target 与运行时对齐
 3. 用 `wasm-tools component wit app.wasm` 查看产物实际 import 版本
 
-
-
 ### Preopen 路径找不到
 
 **现象**：`No such file or directory` 读写 `/data/...`
@@ -1821,8 +1762,6 @@ npx jco transpile app.wasm -o ./generated
 - Guest 内路径是否使用 GUEST 侧名称（`/data` 而非 `./data`）
 - Windows 下建议用 Git Bash 或 WSL 运行 `scripts/*.sh`
 
-
-
 ### P1 与 P2 产物混淆
 
 
@@ -1832,17 +1771,12 @@ npx jco transpile app.wasm -o ./generated
 | `wasm-tools component wit` | 报错/不适用                  | 可列出 world               |
 | 产物目录                       | `target/wasm32-wasip1/` | `target/wasm32-wasip2/` |
 
-
-
-
 ### P3 相关
 
 - `wasm32-wasip3` 仅在 **nightly** toolchain 可用，stable rustup 无法安装
 - 本文 [wasi-road-demo](../wasi-road-demo/) **不提供** P3 可运行 demo；P3 命令以官方文档为准
 
 ---
-
-
 
 ## 附录 D：demo 索引
 
@@ -1862,7 +1796,6 @@ wasi-road-demo/
     └── run-p2.sh              # 一键运行 P2
 ```
 
-
 | 路径                        | 文章章节    | 验证命令                     |
 | ------------------------- | ------- | ------------------------ |
 | `crates/wasi-p1-cli-demo` | 第 2 章   | `bash scripts/run-p1.sh` |
@@ -1870,10 +1803,7 @@ wasi-road-demo/
 | `hosts/jco-p2-host`       | 第 8 章   | `jco transpile` + Node   |
 | `crates/wasi-p3-cli-demo` | 第 6–7 章 | **暂缓**（需 nightly）        |
 
-
 ---
-
-
 
 ## 附录 E：开源项目速查
 
