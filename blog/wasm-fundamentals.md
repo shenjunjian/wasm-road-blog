@@ -17,13 +17,14 @@ description: "从栈式虚拟机、段结构与指令集讲起，覆盖浏览器
 2. [第 1 章：Wasm 原理与栈式虚拟机](#第-1-章wasm-原理与栈式虚拟机)
 3. [第 2 章：二进制格式与段结构](#第-2-章二进制格式与段结构)
 4. [第 3 章：指令集、内存模型与平台限制](#第-3-章指令集内存模型与平台限制)
-5. [第 4 章：网页引入 wasm 与流式加载](#第-4-章网页引入-wasm-与流式加载)
-6. [第 5 章：多语言编译 Wasm — 以 Rust 为例](#第-5-章多语言编译-wasm--以-rust-为例)
-7. [第 6 章：wasm-pack 与 wasm-bindgen 生态](#第-6-章wasm-pack-与-wasm-bindgen-生态)
-8. [第 7 章：napi-rs — 原生 Node 模块与 Wasm 回退](#第-7-章napi-rs--原生-node-模块与-wasm-回退)
-9. [附录 A：用 WAT 手写一个最小模块](#附录-a用-wat-手写一个最小模块)
-10. [附录 B：常见问题与排错](#附录-b常见问题与排错)
-11. [总结与延伸阅读](#总结与延伸阅读)
+5. [第 4 章：Wasm 版本演进：从 MVP 到 3.0](#第-4-章wasm-版本演进从-mvp-到-30)
+6. [第 5 章：Rust wasm 与流式加载](#第-5-章rust-wasm-与流式加载)
+7. [第 6 章：多语言编译 Wasm — 以 Rust 为例](#第-6-章多语言编译-wasm--以-rust-为例)
+8. [第 7 章：wasm-bindgen 深入](#第-7-章wasm-bindgen-深入)
+9. [第 8 章：napi-rs — 原生 Node 模块与 Wasm 回退](#第-8-章napi-rs--原生-node-模块与-wasm-回退)
+10. [附录 A：用 WAT 手写一个最小模块](#附录-a用-wat-手写一个最小模块)
+11. [附录 B：常见问题与排错](#附录-b常见问题与排错)
+12. [总结与延伸阅读](#总结与延伸阅读)
 
 ---
 
@@ -968,9 +969,130 @@ console.log(jsString);
 
 ---
 
-## 第 4 章：Rust wasm 与流式加载
+## 第 4 章：Wasm 版本演进：从 MVP 到 3.0
 
-### 4.1 Rust 编译最简wasm工程
+前三章按「二进制长什么样、指令能做什么」讲清了 **Wasm 1.0（MVP）基线**。现实工程里你还会碰到 SIMD、`externref`、WasmGC、原生异常——它们不是「另一个语言」，而是同一条标准线在 **1.0 → 2.0 → 3.0** 上陆续打包进来的能力。
+
+演进方式一直是：**先以提案（proposal）独立落地到引擎，再汇总进官方规范版本**。版本之间承诺**向后兼容**：合法的 1.0 模块在 2.0 / 3.0 引擎里仍然合法、行为不变。阅读本章时请对照 §3.2：那边按 **Chrome 提案落地表** 看「哪一年进了哪款浏览器」；本章按 **规范发行版** 看「能力被打包进哪个版本、跨浏览器大概从哪一代齐套」。数据来源以 [webassembly.org/features](https://webassembly.org/features/)（`features.json`）为准，截至 2026 年初。
+
+### 4.1 版本时间线总览
+
+```mermaid
+timeline
+    title WebAssembly 核心规范版本
+    2017 : MVP 设计完成与四浏览器共识
+    2017 : Wasm 1.0 基线广泛可用
+    2022 : 2.0 规范文本基本定稿
+    2024-12 : Wasm 2.0 成为 W3C 正式标准
+    2025-09 : Wasm 3.0 发布为新的 live 标准
+```
+
+| 版本 | 里程碑 | 一句话 |
+|------|--------|--------|
+| **1.0（MVP）** | 2017 年四浏览器共识；随后成为 W3C Recommendation | 栈式 VM + 线性内存 + 172 条指令，可移植的最小编译目标 |
+| **2.0** | 约 2022 年 CG/WG 定稿；[2024-12 正式成标](https://webassembly.org/news/2025-03-20-wasm-2.0/) | SIMD、批量内存、多返回值、简单引用类型等「算力与互操作」升级 |
+| **3.0** | [2025-09 发布](https://webassembly.org/news/2025-09-17-wasm-3.0/) | GC、异常、Memory64、多内存、尾调用等，显著改善托管语言与大型应用 |
+
+完整变更清单见规范附录 [Change History](https://webassembly.github.io/spec/core/appendix/changes.html)。注意：**规范写进 2.0 / 3.0 ≠ 当天所有浏览器齐套**——引擎往往早于 W3C 流程数年就已默认开启部分提案。
+
+### 4.2 Wasm 1.0（MVP）：基线能力
+
+MVP 就是前文一直在展开的那一层：
+
+| 能力 | MVP 边界 |
+|------|----------|
+| 执行模型 | 栈式虚拟机；模块校验后实例化 |
+| 二进制 | 魔数 `\0asm` + version 1；**12 种标准段** |
+| 指令 | **172 条**单字节 opcode |
+| 值类型 | `i32` / `i64` / `f32` / `f64`（无 `v128`、无可区分堆类型） |
+| 内存 | 默认**一个**线性内存，`i32` 寻址（最大约 4 GiB） |
+| 控制流 | `block` / `loop` / `if`、`br`、`call` / `call_indirect` |
+| 明确没有 | GC 堆、原生异常、SIMD、尾调用、多返回值 |
+
+对前端 / Node 工程的意义：**几乎所有主流浏览器从 2017 起就能跑这份基线**——这也是「万一高级特性不可用就回退到 baseline `.wasm`」策略的底线。
+
+| 引擎 | 起始版本（默认开启） | 时间 |
+|------|---------------------|------|
+| Chrome | 57 | 2017-03 |
+| Edge（原 EdgeHTML） | 16 | 2017 |
+| Firefox | 52 | 2017-03 |
+| Safari | 11 | 2017-09 |
+
+Chromium 系 Edge 此后随 Chrome 版本演进，下表不再单独列 Edge。
+
+### 4.3 Wasm 2.0：算力与引用类型升级
+
+2.0 把一批已在引擎里跑了多年的提案写进「当前标准」。官方公告里的增量可以压成六类：
+
+| 特性包 | 解决什么问题 | 代表能力 |
+|--------|--------------|----------|
+| Sign-extension | 有符号窄整数扩展不再绕内存 load | `i32.extend8_s` 等 |
+| Non-trapping float-to-int | 浮点转整型越界时**饱和**而不 trap | `i32.trunc_sat_f32_s` 等 |
+| Multi-value | 函数 / 块可多返回值；块可带参数 | `(result i32 i32)` |
+| Reference Types | JS 对象 / 函数引用成为一等值 | `funcref`、`externref`；多表；`table.get/set` |
+| Bulk Memory | 大块初始化与拷贝 | `memory.copy` / `fill` / `init`；passive data；**datacount 段** |
+| Fixed-width SIMD | 128 位向量并行（指令数大幅增加） | `v128`、前缀 `0xfd` |
+
+这对日常工具链的影响很直接：音视频 / ML 内核吃 SIMD；`wasm-bindgen` 传 JS 对象依赖 `externref`；流式编译与 data 段策略依赖 Bulk Memory。Chrome 侧精确版本见 §3.2；下表给跨浏览器对照（同一「2.0 能力包」内各特性落地仍可能差几个大版本）。
+
+| 特性 | Chrome | Firefox | Safari |
+|------|--------|---------|--------|
+| Sign-extension | 74 | 62 | 14.1 |
+| Non-trapping float-to-int | 75 | 64 | 15 |
+| Bulk Memory | 75 | 79 | 15 |
+| Multi-value | 85 | 78 | 13.1 |
+| Fixed-width SIMD | 91 | 89 | 16.4 |
+| Reference Types | 96 | 79 | 15 |
+
+经验法则：若目标需要完整吃下 2.0（含 SIMD + 引用类型），可粗略按 **Chrome 96+ / Firefox 89+ / Safari 16.4+** 估齐套线；只做 Multi-value / Bulk Memory 时可更早。
+
+### 4.4 Wasm 3.0：托管语言与大型应用基建
+
+3.0 是一次更大的升级——多项提案酝酿了六到八年，终于收进 live 标准（[公告](https://webassembly.org/news/2025-09-17-wasm-3.0/)）。对开发者最有体感的是：**Java / Kotlin / Dart / OCaml 等托管语言**终于有像样的编译目标（靠 GC），而 **C++/Rust 的异常**也不必再绕进宿主 JS。
+
+| 特性 | 做什么 | 刻意不做的事 |
+|------|--------|--------------|
+| **Garbage Collection** | 声明 `struct` / `array` 等堆类型，由运行时回收 | 不提供完整对象系统、方法表、闭包——布局与运行时策略仍由编译器负责 |
+| **Typed References** / `call_ref` | 引用带精确类型与子类型；间接调用可少做运行时类型检查 | — |
+| **Exception Handling（exnref）** | 模块内 `throw` / `catch`，带 tag 与 payload | 旧版 Legacy `try/catch` 已被取代（Chrome 曾 95 起支持旧方案，最终版见下表） |
+| **Tail Calls** | `return_call` 等，避免增长调用栈 | — |
+| **Multiple Memories** | **单个模块**声明/导入多个线性内存并直接互拷 | 以前多内存只能拆模块绕 |
+| **Memory64** | 内存 / 表地址可用 `i64` | Web 上仍有宿主上限（公告称约 16 GiB 量级）；非 Web 运行时可更大 |
+| **Relaxed SIMD** | 部分向量指令在边角语义上留实现空间，换性能 | 可与 **Deterministic profile** 搭配，在需要可重现（如链上）时收紧语义 |
+| **Custom Annotations（文本）** | WAT 里可写类似自定义段的注解 | 规范本身不赋语义 |
+| **JS String Builtins**（JS API） | Wasm 直接 import 宿主字符串原语 | 属 JS 嵌入扩展；此外 JSPI 等仍在推进，未全部等同于「3.0 core」 |
+
+浏览器侧：**标准已发布，但并非所有引擎对 3.0 头牌特性齐套**。尤其 Safari 对 Memory64、Multiple Memories 尚未出现在官方 feature 表的版本号里；Relaxed SIMD 在 Safari 仍可能需引擎 flag。
+
+| 特性 | Chrome | Firefox | Safari |
+|------|--------|---------|--------|
+| Tail Call | 112 | 121 | 18.2 |
+| Relaxed SIMD | 114 | 145 | flag（未默认） |
+| GC（WasmGC） | 119 | 120 | 18.2 |
+| Typed Function References | 119 | 120 | 18 |
+| Multiple Memories | 120 | 125 | 尚未支持（features 无版本） |
+| JS String Builtins | 130 | 134 | 26.2 |
+| Memory64 | 133 | 134 | 尚未支持（features 无版本） |
+| Exception Handling（exnref） | 137 | 131 | 18.4 |
+
+因此：发面向全浏览器的生产包时，**不要假设「用户有 3.0 就万事齐备」**——应对 GC / 异常 / Memory64 等做特性探测或提供 baseline 回退。
+
+### 4.5 读版本时的实用提醒
+
+1. **按特性探测，而不是按「浏览器宣称支持 Wasm 3.0」**。JS 侧推荐 [`wasm-feature-detect`](https://github.com/GoogleChromeLabs/wasm-feature-detect)，按需加载不同编译产物（web.dev 上也有分 bundle 的实践）。
+2. **Threads（共享内存 + 原子）**长期以独立提案存在，还依赖站点 [跨域隔离](https://web.dev/articles/cross-origin-isolation-guide)（COOP/COEP）。它与 2.0 / 3.0 的叙事并行，平台限制见 §3.5；Chrome 74+ 等版本见 §3.2。
+3. **Component Model、WASI** 属于生态与系统接口层，**不是** core 规范 1.0→3.0 这条线本身——WASI 见 §3.7，Component / WIT 见后文 Rust 工具链章节。
+4. 需要「某一提案在 Chrome 哪一版默认开启」时，继续用 §3.2 的升序列表；需要「2.0 相对 1.0 多了什么 / 3.0 为托管语言打开了什么」时，回到本章。
+
+### 本章小结
+
+Wasm 的版本故事很短也很清晰：**1.0** 钉死可移植的计算基线；**2.0** 补上 SIMD、批量内存与引用类型，让算力与 JS 互操作上台阶；**3.0** 用 GC、异常、多内存与 Memory64 把托管语言和大寻址空间接进核心标准。标准向后兼容，但浏览器落地不同步——生产环境以特性探测为准。下一章进入浏览器侧加载与 Rust 裸编译实战。
+
+---
+
+## 第 5 章：Rust wasm 与流式加载
+
+### 5.1 Rust 编译最简wasm工程
 
 参见 `simple-wasm` 示例, 下面记录一下重要知识点：
 
@@ -1029,7 +1151,7 @@ use alloc::vec::Vec;
 ```
 alloc 只提供类型定义，还需要全局分配器（如 wee_alloc、dlmalloc）。wasm32-unknown-unknown 默认没有系统分配器，要自己配置，**体积和复杂度**都会上去.
 
-更常见的做法是， 不要加 no_std， 使用  `wasm-bindgen 常规路线`，隐式链接 std，因此可以用 String、Vec 等, 详见第五章。
+更常见的做法是， 不要加 no_std， 使用  `wasm-bindgen 常规路线`，隐式链接 std，因此可以用 String、Vec 等, 详见第六章。
 
 3. #[no_mangle]
 
@@ -1213,7 +1335,7 @@ instance.exports.call_add(1, 10, 20); // → 200（同一条 call_indirect，新
 - `element: 'anyfunc'` 在较新的规范里更常写成 `'funcref'`，语义相同。
 - 若 table 是 **import** 进来的，一般由 **JS 宿主** `set`；若 table 在 Wasm 模块内且 export 给 JS，两边都可以更新（取决于你怎么设计）。
 
-### 4.2 完整 HTML 示例
+### 5.2 完整 HTML 示例
 
 浏览器通过 `WebAssembly` 全局对象与 Wasm 交互。核心类型：
 
@@ -1367,7 +1489,7 @@ instance.exports.add(3, 4)
 
 
 
-### 4.3 服务器配置
+### 5.3 服务器配置
 
 #### Content-Type
 
@@ -1403,7 +1525,7 @@ gzip_types application/wasm;
 
 跨域加载需要服务器返回 `Access-Control-Allow-Origin`。同源部署则无此问题。
 
-### 4.5 与 wasm-bindgen 生成物的关系
+### 5.5 与 wasm-bindgen 生成物的关系
 
 `wasm-pack build` 生成的 `pkg/` 目录结构：
 
@@ -1424,7 +1546,7 @@ pkg/
 
 你不需要手动写 imports——wasm-bindgen 帮你生成好了。
 
-### 4.6 调试技巧
+### 5.6 调试技巧
 
 ```javascript
 // 查看模块导出了什么
@@ -1441,9 +1563,9 @@ console.log(WebAssembly.Module.imports(module));
 
 ---
 
-## 第 5 章：多语言编译 Wasm — 以 Rust 为例
+## 第 6 章：多语言编译 Wasm — 以 Rust 为例
 
-### 5.1 哪些语言可以编译为 Wasm
+### 6.1 哪些语言可以编译为 Wasm
 
 | 语言 | 工具链 | 成熟度 | 典型场景 |
 |------|--------|--------|---------|
@@ -1457,9 +1579,9 @@ console.log(WebAssembly.Module.imports(module));
 
 本文以 **Rust** 为例，因为它的工具链最完善，且内存安全特性与 Wasm 沙箱模型天然契合。
 
-### 5.2 Rust 生态全景关系图
+### 6.2 Rust 生态全景关系图
 
-#### 5.2.1 Rust 的 编译 Target 
+#### 6.2.1 Rust 的 编译 Target 
 编译目标也相当于编译层，就是一份rust源码，可以编译出支持什么指令的产物，比如在我机器，刚升级完成 `rust1.96`后， 查询全部可以目标有 113 个，精简如下：
 
 ``` bash
@@ -1480,7 +1602,7 @@ x86_64-pc-windows-msvc (installed)
 ......
 ```
 
-#### 5.2.2 WASM 的编译层 > 绑定层 > 构建打包工具  和 运行时 的关系
+#### 6.2.2 WASM 的编译层 > 绑定层 > 构建打包工具  和 运行时 的关系
 
 根据下图，理解一下 `编译层 > 绑定层 > 构建打包工具` 之间的依赖关系：
 
@@ -1520,7 +1642,7 @@ flowchart TB
 ```
 
 
-#### 5.2.1 Rust 编译 Target（最基础，不算「库」但必须知道）
+#### 6.2.1 Rust 编译 Target（最基础，不算「库」但必须知道）
 
 | Target | 原理简述 | 典型配合工具 | 场景 | 活跃度 |
 |--------|----------|--------------|------|--------|
@@ -1531,7 +1653,7 @@ flowchart TB
 
 不考虑 `wasi`， 所以 `wasm32-unknown-unknown` 是我们唯一的目标。
 
-#### 5.2.2 核心工具总表（按类别）
+#### 6.2.2 核心工具总表（按类别）
 
   1. 绑定 / 互操作层（决定「Wasm 怎么跟宿主说话」）
 
@@ -1622,9 +1744,9 @@ flowchart TB
 5. **版本耦合陷阱**：`wasm-bindgen` crate 与 `wasm-bindgen-cli` 版本必须一致，否则构建报莫名错误。
 
 
-### 5.3 wasm-pack 环境搭建
+### 6.3 wasm-pack 环境搭建
 
-第四章，我们没有使用任何 `工具链和绑定库` 实现了一个最简单的原生Wasm 编译， 本小节我们搭建一下成熟的工具环境。
+第五章，我们没有使用任何 `工具链和绑定库` 实现了一个最简单的原生Wasm 编译， 本小节我们搭建一下成熟的工具环境。
 
 请参阅 [wasm-pack文档](https://wasm-bindgen.github.io/wasm-pack/)
 
@@ -1643,7 +1765,7 @@ flowchart TB
 | `wasm-pack new my-app` | 从官方模板脚手架创建新项目 |
 | `wasm-pack --version` | 查看当前安装版本 0.15.0 |
 
-**`--target` 取值**（第 6 章有更详细说明）：
+**`--target` 取值**（第 7 章有更详细说明）：
 
 | target | 典型场景 |
 |--------|----------|
@@ -1668,7 +1790,7 @@ wasm-pack build
 wasm-pack build --dev  
 ```
 
-### 5.4 wasm-pack 示例工程解析
+### 6.4 wasm-pack 示例工程解析
 观察示例模板 Cargo.toml 中的配置较低，可以升级上来。
 
 ```toml
@@ -1759,7 +1881,7 @@ export {
 | 生产部署 | `wasm-pack build`（release + wasm-opt），不要用 `target/debug/` 里那个 |
 
 
-### 5.5 wasm-pack 打包体积优化方案
+### 6.5 wasm-pack 打包体积优化方案
 
 Wasm 文件大小直接影响加载速度。常用优化手段：
 
@@ -1775,7 +1897,7 @@ Wasm 文件大小直接影响加载速度。常用优化手段：
 
 `opt-level = "s" | "z"` 它是编译器的优化参数， s 是优选参数， z 是极端压缩，在 s 的基础下再减少 5%~10%。 但牺牲了循环展开，向量化等，会有性能损失，嵌入式设备才有必要这么一点优化。
 
-### 5.6 wasm-pack 模板中为什么没有 `.cargo/config.toml`?
+### 6.6 wasm-pack 模板中为什么没有 `.cargo/config.toml`?
 
  `.cargo/config.toml`只是向 `rustc` 传 `rustflags` 的**一种方式**，等价手段还有：
 
@@ -1808,7 +1930,7 @@ Rust 编译 Wasm 的核心是 `wasm32-unknown-unknown` + `cdylib` + `wasm-pack`�
 
 ---
 
-## 第 6 章：  wasm-bindgen 深入
+## 第 7 章：  wasm-bindgen 深入
 
 通过上面一章，我们看到一个 wasm-pack 模板工程，只依赖了 `wasm-bindgen`  这个包， 所以本质上 rust 开发wasm程序就是学习 `wasm-bindgen` 和它的相关生态包。
 
@@ -1818,7 +1940,7 @@ Rust 编译 Wasm 的核心是 `wasm32-unknown-unknown` + `cdylib` + `wasm-pack`�
 
 下面我们将以更复杂的例子`wasm-pack-interaction-demo`，来演示`rust侧` 与 `JS 侧`的互操作。
 
-### 6.1 生态关系概览
+### 7.1 生态关系概览
 
 这四个 crate 构成 Rust/Wasm 与 JavaScript 互操作的完整栈，层次由底向上依次叠加：
 
@@ -1853,7 +1975,7 @@ graph TB
 
 ---
 
-### 6.2 wasm-bindgen
+### 7.2 wasm-bindgen
 
 文档：[docs.rs/wasm-bindgen](https://docs.rs/wasm-bindgen/latest/wasm_bindgen/index.html)
 
@@ -2082,7 +2204,7 @@ extern "C" {
 
 ---
 
-### 6.3 js-sys
+### 7.3 js-sys
 
 文档：[docs.rs/js-sys](https://docs.rs/js-sys/latest/js_sys/index.html)
 
@@ -2150,7 +2272,7 @@ pub fn create_array() -> JsValue {
 
 ---
 
-### 6.4 web-sys
+### 7.4 web-sys
 
 文档：[docs.rs/web-sys](https://docs.rs/web-sys/latest/web_sys/index.html)
 
@@ -2229,7 +2351,7 @@ pub fn manipulate_dom() -> Result<(), JsValue> {
 
 ---
 
-### 6.5 wasm-bindgen-futures
+### 7.5 wasm-bindgen-futures
 
 文档：[docs.rs/wasm-bindgen-futures](https://docs.rs/wasm-bindgen-futures/latest/wasm_bindgen_futures/index.html)
 
@@ -2303,7 +2425,7 @@ console.log(result); // 6765
 
 ---
 
-### 6.6 字符串传递原理
+### 7.6 字符串传递原理
 
 字符串是 Wasm/JS 互操作中最复杂的类型。wasm-bindgen 的处理流程：
 
@@ -2324,7 +2446,7 @@ JS 字符串 (UTF-16)
 
 这也是为什么需要 wasm-bindgen 的 JS 胶水代码——裸 Wasm 只认识 `i32`/`f64`，不认识字符串。
 
-### 6.7 在 Vite 项目中完整集成
+### 7.7 在 Vite 项目中完整集成
 
 本节用仓库里的两个配套工程，把「Rust 编译 → `pkg/` 产物 → Vite 页面引用」串成完整链路。重点对比 `wasm-pack build --target web` 与 `--target bundler` 的产物差异，以及 JS 侧引入方式的不同。
 
@@ -2482,7 +2604,7 @@ const basic = get_basic_js_values();
 
 两种 target 在 Vite 中都能工作，**关键是构建 target 与 JS 引入写法必须配对**：有 `init` 用 `web`，无 `init` 用 `bundler`。混用（bundler 构建 + `await init()`，或 web 构建却省略 `init()`）是最常见的集成错误。
 
-### 6.8 常用辅助 crate
+### 7.8 常用辅助 crate
 
 | Crate | 作用 |
 |-------|------|
@@ -2500,7 +2622,7 @@ pub fn main() {
 }
 ```
 
-### 6.9 TypeScript 类型生成
+### 7.9 TypeScript 类型生成
 
 `wasm-pack build` 会自动生成 `my_wasm.d.ts`：
 
@@ -2525,9 +2647,9 @@ wasm-bindgen 生态是 Rust 前端 Wasm 开发的核心：`wasm-bindgen` 负责�
 
 ---
 
-## 第 7 章：napi-rs — 原生 Node 模块与 Wasm 回退
+## 第 8 章：napi-rs — 原生 Node 模块与 Wasm 回退
 
-### 7.1 为什么需要 napi-rs
+### 8.1 为什么需要 napi-rs
 
 Node.js 的性能敏感场景（图像处理、数据库驱动、加密、文件解析等）通常需要 **原生扩展**。传统方案：
 
@@ -2577,7 +2699,7 @@ flowchart LR
     wasmFallback --> wasiLoader["*.wasi.cjs + emnapi"]
 ```
 
-### 7.2 项目初始化与 `@napi-rs/cli`
+### 8.2 项目初始化与 `@napi-rs/cli`
 
 [`@napi-rs/cli`](https://www.npmjs.com/package/@napi-rs/cli) 是 napi-rs 的**官方命令行工具**（v3 起用 Rust 重写），负责从创建项目到发布 npm 的全流程。旧版 `npm init napi-rs` 脚手架已不再推荐，当前标准入口是 **`napi new`**。
 
@@ -2712,7 +2834,7 @@ pub fn fibonacci_sequence(count: u32) -> Vec<u32> {
 }
 ```
  
-### 7.3 编译为原生 Node 模块
+### 8.3 编译为原生 Node 模块
 
  `napi-rs-demo` 就是官方 `package-template` 生成的：
 ```
@@ -2985,7 +3107,7 @@ pub fn divide(a: f64, b: f64) -> Result<f64> {
 }
 ```
 
-### 7.4 Wasm 回退方案
+### 8.4 Wasm 回退方案
 
 #### 何时需要 Wasm 回退
 
@@ -3061,7 +3183,7 @@ Cross-Origin-Embedder-Policy: require-corp
 
 Vite 示例见 [napi.rs WebAssembly 文档](https://napi.rs/docs/concepts/webassembly)。浏览器侧 import 构建生成的 `*.wasi-browser.js`，而非已废弃的独立 `browser.js` 模板文件。
 
-### 7.5 两条路径对比
+### 8.5 两条路径对比
 
 | 维度 | 原生 `.node` | Wasm 回退 `.wasm` |
 |------|-------------|-------------------|
@@ -3076,7 +3198,7 @@ Vite 示例见 [napi.rs WebAssembly 文档](https://napi.rs/docs/concepts/webass
 | 典型场景 | 生产环境、性能敏感 | 冷门平台、在线 Playground |
 | 与 wasm-bindgen | 无关 | 无关（走 N-API 语义，非 DOM 绑定） |
 
-### 7.6 三条 Wasm/Native 路径总览
+### 8.6 三条 Wasm/Native 路径总览
 
 至此，本文涉及三条集成路径（napi-rs Wasm 回退在 Node 与浏览器各有一条加载链路，见下表末行）：
 
