@@ -970,7 +970,7 @@ console.log(jsString);
 
 ## 第 4 章：Rust wasm 与流式加载
 
-### 4.1 完整rust 编译最简wasm工程
+### 4.1 Rust 编译最简wasm工程
 
 参见 `simple-wasm` 示例, 下面记录一下重要知识点：
 
@@ -1424,7 +1424,7 @@ pkg/
 
 你不需要手动写 imports——wasm-bindgen 帮你生成好了。
 
-### 4.7 调试技巧
+### 4.6 调试技巧
 
 ```javascript
 // 查看模块导出了什么
