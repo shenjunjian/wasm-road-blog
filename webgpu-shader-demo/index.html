@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>WebGPU Shader Demo — 人物 · 法术环 · Compute 粒子</title>
+    <title>WebGPU Shader Demo — 选择示例</title>
     <style>
       * {
         box-sizing: border-box;
@@ -12,73 +12,119 @@
       }
       html,
       body {
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        background: #0b1220;
+        min-height: 100%;
+        background:
+          radial-gradient(ellipse 80% 60% at 20% 10%, rgba(70, 120, 200, 0.22), transparent 55%),
+          radial-gradient(ellipse 70% 50% at 85% 80%, rgba(40, 90, 140, 0.18), transparent 50%),
+          #0b1220;
         font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
         color: #e8eef8;
       }
-      #app {
-        position: relative;
-        width: 100%;
-        height: 100%;
-      }
-      canvas {
-        display: block;
-        width: 100%;
-        height: 100%;
-      }
-      #hud {
-        position: absolute;
-        left: 16px;
-        top: 16px;
-        max-width: min(420px, calc(100% - 32px));
-        padding: 12px 14px;
-        background: rgba(8, 14, 28, 0.55);
-        border: 1px solid rgba(140, 180, 255, 0.2);
-        border-radius: 8px;
-        backdrop-filter: blur(8px);
-        font-size: 13px;
-        line-height: 1.55;
-        pointer-events: none;
-      }
-      #hud h1 {
-        font-size: 15px;
-        font-weight: 600;
-        margin-bottom: 6px;
-        letter-spacing: 0.02em;
-      }
-      #hud p {
-        opacity: 0.85;
-      }
-      #error {
-        display: none;
-        position: absolute;
-        inset: 0;
+      .wrap {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
-        padding: 24px;
-        text-align: center;
-        background: #0b1220;
-        z-index: 10;
+        padding: 40px 20px;
+        gap: 28px;
       }
-      #error.visible {
-        display: flex;
+      header {
+        text-align: center;
+        max-width: 560px;
+      }
+      header h1 {
+        font-size: clamp(1.4rem, 3vw, 1.85rem);
+        font-weight: 650;
+        letter-spacing: 0.02em;
+        margin-bottom: 10px;
+      }
+      header p {
+        font-size: 0.95rem;
+        line-height: 1.6;
+        opacity: 0.8;
+      }
+      .choices {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 16px;
+        width: min(720px, 100%);
+      }
+      a.card {
+        display: block;
+        padding: 22px 20px;
+        border-radius: 12px;
+        border: 1px solid rgba(140, 180, 255, 0.22);
+        background: rgba(8, 14, 28, 0.65);
+        backdrop-filter: blur(10px);
+        color: inherit;
+        text-decoration: none;
+        transition:
+          border-color 0.2s ease,
+          transform 0.2s ease,
+          background 0.2s ease;
+      }
+      a.card:hover {
+        border-color: rgba(160, 200, 255, 0.55);
+        background: rgba(14, 24, 44, 0.85);
+        transform: translateY(-2px);
+      }
+      a.card:focus-visible {
+        outline: 2px solid #7eb6ff;
+        outline-offset: 3px;
+      }
+      .tag {
+        display: inline-block;
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        opacity: 0.65;
+        margin-bottom: 10px;
+      }
+      a.card h2 {
+        font-size: 1.15rem;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      a.card p {
+        font-size: 0.88rem;
+        line-height: 1.55;
+        opacity: 0.8;
+      }
+      footer {
+        font-size: 12px;
+        opacity: 0.5;
+        text-align: center;
       }
     </style>
   </head>
   <body>
-    <div id="app">
-      <canvas id="gpu-canvas"></canvas>
-      <div id="hud">
-        <h1>WebGPU · Shader Demo</h1>
+    <div class="wrap">
+      <header>
+        <h1>WebGPU Shader Demo</h1>
         <p>
-          草地 · 程序化人物 · 武器轻摆 · 环线法术 · 头顶 Compute 粒子
+          同一画面：草地、程序化人物、武器轻摆、环线法术、头顶粒子。<br />
+          请选择实现路径进入示例。
         </p>
-      </div>
-      <div id="error"></div>
+      </header>
+      <nav class="choices" aria-label="示例选择">
+        <a class="card" href="/raw/">
+          <span class="tag">Raw WebGPU</span>
+          <h2>纯 WebGPU / WGSL</h2>
+          <p>
+            无框架依赖。手写管线、Uniform、Compute Pass 与一次
+            <code>submit</code>，与博客概念一一对应。
+          </p>
+        </a>
+        <a class="card" href="/three/">
+          <span class="tag">Three.js</span>
+          <h2>Three.js + WebGPURenderer</h2>
+          <p>
+            用场景图与 TSL 材质/Compute 实现同样效果，对照框架如何封装 WebGPU。
+          </p>
+        </a>
+      </nav>
+      <footer>需要支持 WebGPU 的浏览器（推荐 Chrome / Edge）</footer>
     </div>
-    <script type="module" src="/src/main.js"></script>
   </body>
 </html>

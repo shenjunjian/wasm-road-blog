@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>纯 WebGPU — 人物 · 法术环 · Compute 粒子</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #0b1220;
+        font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        color: #e8eef8;
+      }
+      #app {
+        position: relative;
+        width: 100%;
+        height: 100%;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      #hud {
+        position: absolute;
+        left: 16px;
+        top: 16px;
+        max-width: min(420px, calc(100% - 32px));
+        padding: 12px 14px;
+        background: rgba(8, 14, 28, 0.55);
+        border: 1px solid rgba(140, 180, 255, 0.2);
+        border-radius: 8px;
+        backdrop-filter: blur(8px);
+        font-size: 13px;
+        line-height: 1.55;
+        pointer-events: none;
+      }
+      #hud h1 {
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 6px;
+        letter-spacing: 0.02em;
+      }
+      #hud p {
+        opacity: 0.85;
+      }
+      #hud a {
+        pointer-events: auto;
+        color: #9ec5ff;
+        text-decoration: none;
+      }
+      #hud a:hover {
+        text-decoration: underline;
+      }
+      #error {
+        display: none;
+        position: absolute;
+        inset: 0;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        text-align: center;
+        background: #0b1220;
+        z-index: 10;
+      }
+      #error.visible {
+        display: flex;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="gpu-canvas"></canvas>
+      <div id="hud">
+        <h1>纯 WebGPU · 无框架</h1>
+        <p>
+          草地 · 程序化人物 · 武器轻摆 · 环线法术 · 头顶 Compute 粒子
+        </p>
+        <p style="margin-top: 8px"><a href="/">← 返回选择</a></p>
+      </div>
+      <div id="error"></div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
