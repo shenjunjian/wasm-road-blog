@@ -1008,4 +1008,115 @@ rpass.drawIndexed(characterMesh.indexCount);
 `setVertexBuffer` / `setIndexBuffer` 会覆盖当前绑定；下一次 draw 只看**当前绑着的那对 buffer**。草地和人物从未挤在同一块显存里靠偏移硬拆。
 
 若以后要「合批」成一个大缓冲，才需要自己用偏移（`setVertexBuffer(slot, buffer, offset, size)`）在同一块里划区间；当前 demo 没有这样做。
+
+### 8.4 `createOpaquePipeline`：一份模块里的 VS / FS，以及为什么不把四个 `.wgsl` 揉成一个
+
+`pipelines/opaque.js` 只有两步：
+
+```js
+export function createOpaquePipeline(device, format, depthFormat) {
+  const module = device.createShaderModule({ code: opaqueCode });
+  return device.createRenderPipeline({
+    layout: "auto",
+    vertex: {
+      module,
+      entryPoint: "vs_main",
+      buffers: [VERTEX_LAYOUT],
+    },
+    fragment: {
+      module,              // ← 同一个 module
+      entryPoint: "fs_main",
+      targets: [{ format }],
+    },
+    // … primitive / depthStencil …
+  });
+}
+```
+
+容易漏掉的一点：**一个 `GPUShaderModule` 可以同时装 `@vertex` 和 `@fragment`**。`opaque.wgsl` 里 `vs_main` 与 `fs_main` 写在同一份源码；创建管线时用 `entryPoint` 分别点名。不必「一个阶段一个 module」。
+
+对应关系：
+
+```text
+opaque.wgsl
+  ├─ @vertex   fn vs_main  ←── vertex.entryPoint
+  └─ @fragment fn fs_main  ←── fragment.entryPoint
+         ↑
+   同一个 createShaderModule 的产物
+```
+
+#### 那为什么不把 `aura` / `particles_*` 也塞进同一个文件？
+
+直觉是：「合在一起只编译一次，更省」。实际几乎**省不到运行时性能**，还会把布局和管线状态搅在一起。
+
+| 想法 | 实际情况 |
+|---|---|
+| 合文件 = 只编译一次 | `createShaderModule` 主要做解析/校验；**真正按入口点编出 GPU 可执行码**，发生在每次 `createRenderPipeline` / `createComputePipeline`。四个管线仍要创建四次，各自编译自己的 entryPoint。 |
+| 少几个 module 就更快 | 启动时多几次 `createShaderModule` 的开销相对整帧渲染可忽略；**每帧 draw 只认当前 `setPipeline` 绑的那条管线**，与源码是否同文件无关。 |
+| entryPoint 切换就能复用 | 管线还烤死了深度写、混合、剔除、拓扑等固定功能状态。不透明 / 光环 / 粒子渲染的 `depthWrite`、`blend`、`cullMode` 不同，**本来就要多条 `GPURenderPipeline`**；Compute 更是另一种管线。 |
+| 绑定也能共用 | 四份 shader 的 `@group` / `@binding` 布局不同（opaque 一套 `Uniforms`；aura 另一套；粒子还有 `storage` + 另一套 uniform）。硬塞进一个模块，反而要小心符号冲突，或维护一大坨互不相关的 binding。 |
+
+demo 拆成四个文件，是为了：**一份源码对应一条管线语义**，binding 与状态一眼能对上。同模块多入口适合「同一条管线族、多套变体」（例如几个相近的材质入口）；不适合把深度写开的不透明和关深度写的加色混合硬绑在一起。
+
+#### VS / FS 能看见什么、往下传什么
+
+以 `opaque.wgsl` 为轴（光环、粒子同理，只是 binding 内容不同）。
+
+**① 资源怎么声明：`group` / `binding` / 地址空间**
+
+| 写法 | 含义 |
+|---|---|
+| `@group(0)` | 第 0 套 bind group（对应 JS `setBindGroup(0, …)`） |
+| `@binding(0)` | 该组内第 0 号槽（对应 bind group `entries` 里的 `binding: 0`） |
+| `var<uniform>` | 只读常量缓冲，适合矩阵、时间、材质开关 |
+| `var<storage, read>` / `read_write` | 大块结构化缓冲（粒子用）；compute 常要 `read_write` |
+| `var t: texture_2d<f32>` + `var s: sampler` | 贴图与采样器（本 demo 的 opaque 未用，靠程序化色） |
+
+**② 顶点着色器入参**
+
+| 来源 | 写法示例 | 谁提供 |
+|---|---|---|
+| 顶点缓冲属性 | `@location(0) position: vec3f` | `VERTEX_LAYOUT` 的 `shaderLocation` + `setVertexBuffer` |
+| 内建索引 | `@builtin(vertex_index)` / `instance_index` | 光栅化调度（粒子广告牌靠这个拼四边形） |
+| Uniform / Storage | 通过上面的 `@group`/`@binding` 全局变量 | `setBindGroup` |
+
+**③ 顶点着色器流出（给光栅化 → 再给 FS）**
+
+| 标记 | 示例 | 下一站 |
+|---|---|---|
+| `@builtin(position)` | 裁剪空间 `vec4f` | **必须**；做裁剪、视口变换、深度 |
+| `@location(n)` | `worldPos` / `normal` / `uv` | 透视校正插值后，作为片元入参 |
+| （可选）`@builtin(point_size)` 等 | 点精灵等 | 视硬件/特性而定 |
+
+光栅化把三角形拆成片元时，会对各 `@location` 做插值；所以 FS 里拿到的 `normal` 往往要再 `normalize` 一次。
+
+**④ 片元着色器入参与流出**
+
+| 方向 | 写法 | 含义 |
+|---|---|---|
+| 入 | 整个 `VSOut`（或拆开的 `@location`） | 插值后的 varyings |
+| 入 | 同一套 `@group`/`@binding` | FS 也能读 uniform / texture |
+| 出 | `-> @location(0) vec4f` | 写入 `fragment.targets[0]` 颜色附件 |
+| 出 | （可选）`@builtin(frag_depth)` | 改写深度；本 demo 未用 |
+
+不透明路径里 alpha 基本是 `1.0`；半透明光环/粒子则写出带 alpha 的颜色，交给管线上的 `blend` 去加色混合。
+
+#### VS / FS 常用内建与库函数（速查）
+
+WGSL 没有「随便 `#include` 标准库头文件」的写法，数值与向量运算是语言内建。下面按 demo 里真正碰到的类别汇总（远非全集）：
+
+| 类别 | 常用符号 | 典型用途 |
+|---|---|---|
+| 构造 / 分量 | `vec2f`/`vec3f`/`vec4f`/`mat4x4f`，`.xyz`，`vec4f(v, 1.0)` | 升维、取 swizzle |
+| 向量几何 | `dot`、`cross`、`normalize`、`length`、`distance`、`reflect` | 光照、法线、广告牌 |
+| 标量算术 | `abs`、`min`/`max`、`clamp`、`mix`、`step`、`smoothstep`、`pow`、`exp`/`log` | 混合、高光、软边 |
+| 三角函数 | `sin`/`cos`/`tan`、`asin`/… | 摆动、条纹、呼吸灯 |
+| 取整 / 分数 | `floor`、`ceil`、`fract`、`round` | 草地格子、UV 流动 |
+| 矩阵 | `*`（`mat * vec`）、`transpose`、`determinant` | MVP、法线变换 |
+| 逻辑 / 选择 | `select(f, t, cond)`、`if`/`else` | 材质分支（`materialKind`） |
+| 纹理（本 opaque 未用） | `textureSample`、`textureLoad`、`textureDimensions` | 采样贴图 |
+| 阶段内建输入 | `@builtin(position)`、`vertex_index`、`frag_depth`… | 见上两表 |
+| 用户函数 | `fn hash21(...)` | 自己写的辅助函数，VS/FS 都可调用 |
+
+对照阅读：带注释的完整源码见 [`opaque.wgsl`](../webgpu-shader-demo/src/shaders/opaque.wgsl)。读管线工厂时，记住口诀——**module 装源码，pipeline 点入口并烤死状态；合文件省不了管线编译，也省不了每帧的 draw。**
  
