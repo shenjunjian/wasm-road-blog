@@ -1118,5 +1118,74 @@ WGSL 没有「随便 `#include` 标准库头文件」的写法，数值与向量
 | 阶段内建输入 | `@builtin(position)`、`vertex_index`、`frag_depth`… | 见上两表 |
 | 用户函数 | `fn hash21(...)` | 自己写的辅助函数，VS/FS 都可调用 |
 
-对照阅读：带注释的完整源码见 [`opaque.wgsl`](../webgpu-shader-demo/src/shaders/opaque.wgsl)。读管线工厂时，记住口诀——**module 装源码，pipeline 点入口并烤死状态；合文件省不了管线编译，也省不了每帧的 draw。**
- 
+#### `u` 的值是哪句话注入 / 绑定的？
+
+`opaque.wgsl` 里这一行：
+
+```wgsl
+@group(0) @binding(0) var<uniform> u: Uniforms;
+```
+
+只是**声明槽位**，本身不含数据。值要靠 JS 侧「建缓冲 → 写入 → 绑进 bind group → 画前挂上」四步到位。整条链都在 `main.js`。
+
+**① 建缓冲（空壳）**
+
+```js
+const groundUB = createUniformBuffer(device, UNIFORM_SIZE);
+const charUB = createUniformBuffer(device, UNIFORM_SIZE);
+const weaponUB = createUniformBuffer(device, UNIFORM_SIZE);
+```
+
+**② 把缓冲绑到 `@group(0) @binding(0)`（建立槽位 ↔ GPUBuffer 的契约）**
+
+```js
+const groundBG = device.createBindGroup({
+  layout: opaquePipeline.getBindGroupLayout(0),
+  entries: [{ binding: 0, resource: { buffer: groundUB } }],
+});
+// charBG / weaponBG 同理，各自指向 charUB / weaponUB
+```
+
+这里的 `binding: 0` 必须对上 WGSL 的 `@binding(0)`；`getBindGroupLayout(0)` 对上 `@group(0)`。
+
+**③ 每帧写入数值（真正「注入」`u` 的内容）**
+
+```js
+fillOpaqueUniform(groundUB, viewProj, identity(), 0, time);
+fillOpaqueUniform(charUB, viewProj, characterModel, 1, time);
+fillOpaqueUniform(weaponUB, viewProj, weaponModel, 2, time);
+```
+
+`fillOpaqueUniform` 内部把 `viewProj` / `model` / 光照 / tint / `params`（含 `materialKind`、time）打进 `Float32Array`，再：
+
+```js
+device.queue.writeBuffer(buffer, 0, data);
+```
+
+布局必须与 WGSL 的 `Uniforms` 结构体一致，否则矩阵/材质开关会对错位。
+
+**④ 画之前挂上 bind group（让当前 draw 能读到这份 `u`）**
+
+```js
+rpass.setBindGroup(0, groundBG);   // ← group 0 = 上面的 groundBG
+rpass.drawIndexed(groundMesh.indexCount);
+
+rpass.setBindGroup(0, charBG);
+rpass.drawIndexed(characterMesh.indexCount);
+
+rpass.setBindGroup(0, weaponBG);
+rpass.drawIndexed(weaponMesh.indexCount);
+```
+
+对应关系可以记成：
+
+```text
+opaque.wgsl:  @group(0) @binding(0) var<uniform> u
+                    ↑              ↑
+main.js:      setBindGroup(0, …)  entries[{ binding: 0, buffer: *UB }]
+                    ↑
+              writeBuffer(*UB, …) ← fillOpaqueUniform 每帧写入
+```
+
+草地 / 人物 / 武器共用同一份 `opaque.wgsl` 与同一条 `opaquePipeline`，靠**不同的 uniform 缓冲 + 不同的 bind group** 切换 `model` 与 `materialKind`；`setBindGroup(0, …)` 就是在换「当前 `u` 指向哪块缓冲」。
+

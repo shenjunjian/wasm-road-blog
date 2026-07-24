@@ -134,19 +134,17 @@ function interleave(positions, normals, uvs) {
 
 export function createGround(size = 24) {
   const h = size / 2;
-  // 四角坐标表
+  // 四角：XZ 平面，法线朝 +Y；绕序须为 CCW（从上方看），否则 back cull 整片消失只剩天空色
   const positions = [
     -h, 0, -h, h, 0, -h, h, 0, h, -h, 0, h,
   ];
-  // 法线
   const normals = [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0];
-  // 纹理坐标
   const uvs = [0, 0, size, 0, size, size, 0, size];
-  // 索引
-  const indices = [0, 1, 2, 0, 2, 3];
+  // 原先 [0,1,2,0,2,3] 叉积朝 -Y，会被 cullMode:"back" 剔掉
+  const indices = [0, 2, 1, 0, 3, 2];
   return {
-    // 将位置、法线、纹理坐标合并成一个 Float32Array，每一个点占用 8 个字节： 3+3+2
-    vertices: interleave(positions, normals, uvs), 
+    // 交错：position(3) + normal(3) + uv(2) = 8 floats / 顶点
+    vertices: interleave(positions, normals, uvs),
     indices: new Uint16Array(indices),
     kind: "ground",
   };

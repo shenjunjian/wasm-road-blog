@@ -131,18 +131,27 @@ async function main() {
 
   let lastT = performance.now();
 
+  // 打包布局必须与 opaque.wgsl 的 Uniforms 一致（按 f32 下标）：
+  //   [0..15]  viewProj   mat4x4
+  //   [16..31] model      mat4x4
+  //   [32..35] lightDir   vec4  — xyz 光照方向，w 未用
+  //   [36..39] tint       vec4  — rgb 基色调色，a 未用
+  //   [40..43] params     vec4  — x: materialKind(0 草地/1 人物/2 武器), y: time, zw 未用
   function fillOpaqueUniform(buffer, viewProj, model, kind, time) {
     const data = new Float32Array(UNIFORM_SIZE / 4);
-    writeMat4(data, 0, viewProj);
-    writeMat4(data, 16, model);
+    writeMat4(data, 0, viewProj);  // viewProj
+    writeMat4(data, 16, model);    // model
+    // lightDir
     data[32] = 0.35;
     data[33] = -1.0;
     data[34] = 0.45;
     data[35] = 0;
+    // tint
     data[36] = 1;
     data[37] = 1;
     data[38] = 1;
     data[39] = 1;
+    // params
     data[40] = kind;
     data[41] = time;
     data[42] = 0;
