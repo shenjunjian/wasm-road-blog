@@ -664,3 +664,348 @@ UI、文字与 3D 特效一样：都要有三角形覆盖目标像素，都要�
 5. **UI 与文字**是最后的屏幕空间批次，用图集与字体图集合批绘制，原理与 3D 相同。
 
 把这条链吃透之后，再去看 PBR 公式或噪声流光，都只是某一段 FS/VS 里的细节；而「人物、武器、光效、粒子如何组成一帧」，则始终是调度与管线问题。本地演示 [`webgpu-shader-demo`](../webgpu-shader-demo/) 正是按同一条链实现的最小可运行样本。
+
+---
+
+## 8. 纯 WebGPU Shader 源码解读拾遗
+
+前面各章按「原理链」讲渲染；本章反过来，对着 [`webgpu-shader-demo`](../webgpu-shader-demo/) 里容易一眼滑过、却又卡人的几处源码细节做拾遗。读时可对照 `src/main.js`、`src/geometry.js`、`src/mesh.js` 与 `src/pipelines/*.js`。
+
+### 8.1 `format`：画布颜色格式的两端契约
+
+演示启动时有一行：
+
+```js
+const format = navigator.gpu.getPreferredCanvasFormat();
+```
+
+它拿到的不是「随便一个字符串」，而是当前平台/浏览器**最合适的 canvas 颜色纹理格式**（`GPUTextureFormat`）。常见取值：
+
+| 平台倾向 | `format` |
+|---|---|
+| 多数 Windows / macOS | `"bgra8unorm"` |
+| 部分 Linux / Android | `"rgba8unorm"` |
+
+含义大致是：每通道 8 位、归一化到 \[0,1\]、未强制标成 sRGB 的那一类。它描述的是：**最终要呈现到屏幕的那张颜色纹理，每个像素怎么存。**
+
+#### 同一份 `format` 必须出现在两处
+
+**① 配置交换链（决定纹理「长什么样」）**
+
+```js
+context.configure({
+  device,
+  format,
+  alphaMode: "opaque",
+});
+```
+
+之后每帧 `context.getCurrentTexture()` 返回的可呈现纹理，格式就是这个 `format`。
+
+**② 创建渲染管线（声明片元「往哪种纹理上写」）**
+
+`main.js` 把同一个 `format` 传给各管线工厂，最终进 `createRenderPipeline` 的 `fragment.targets`：
+
+```js
+// pipelines/opaque.js 等
+fragment: {
+  module,
+  entryPoint: "fs_main",
+  targets: [{ format }],  // 与 canvas 交换链格式必须一致
+},
+```
+
+法术环、粒子管线同理；半透明管线只是在 `targets[0]` 上多配了 `blend`，**颜色格式仍用这份 `format`**。
+
+可以把两端想成合同：
+
+| 端 | 作用 |
+|---|---|
+| `context.configure({ format })` | 交换链颜色纹理用什么格式 |
+| `createRenderPipeline` → `targets: [{ format }]` | 管线承诺只往这种格式的附件上写 |
+
+两边必须相同。若管线写死 `"rgba8unorm"`、本机 `getPreferredCanvasFormat()` 却是 `"bgra8unorm"`，创建管线或 `beginRenderPass` 时会校验失败。所以 demo 从不手写格式字符串，而是**取一次 preferred，再处处复用**。
+
+#### 和 `DEPTH_FORMAT` 不要混
+
+demo 里颜色与深度是两套格式：
+
+| 变量 | 典型值 | 用途 |
+|---|---|---|
+| `format`（preferred canvas） | `bgra8unorm` / `rgba8unorm` | 颜色附件 → 最后呈现到屏幕 |
+| `DEPTH_FORMAT` | `"depth24plus"` | 深度附件 → 只做遮挡测试，**不进** canvas |
+
+管线里对应两处声明：
+
+```js
+targets: [{ format }],                    // 颜色输出
+depthStencil: { format: depthFormat, ... } // 深度附件
+```
+
+#### 附带：`resize` 为何反复 `configure`，却不传 `w/h`
+
+读源码时容易疑惑：`window` 缩放时 `resize()` 会再调一次 `configure({ device, format, alphaMode })`，参数里没有宽高，为何还要反复调用？
+
+尺寸不是写在 `configure` 参数里的，而是写在 **canvas 绘图缓冲**上：
+
+```js
+canvas.width = w;   // CSS 布局尺寸 × devicePixelRatio
+canvas.height = h;
+context.configure({ device, format, alphaMode: "opaque" });
+// 未写 size 时，按当前 canvas.width / canvas.height 建交换链
+```
+
+`configure` 除了登记 `device/format`，还会按当前缓冲尺寸创建/绑定一块**固定分辨率**的交换链。窗口变大变小后：
+
+1. 先改 `canvas.width/height`；  
+2. 再 `configure` → 颜色交换链按新尺寸重建；  
+3. 再 `recreateDepth()` → 深度纹理改成同样的新尺寸。  
+
+若不重新 `configure`，`getCurrentTexture()` 可能仍是旧分辨率，而深度已按新尺寸重建，颜色与深度附件尺寸不一致，`beginRenderPass` 就会挂。规范也允许显式写 `size: [w, h]`；demo 选择「先设 canvas 尺寸、再 configure」——效果等价。
+
+**一句话**：`format` 是颜色交换链与渲染管线之间的格式契约；`resize` 反复 `configure`，是为了在契约不变的前提下，让交换链分辨率跟着窗口走。
+
+### 8.2 地面网格：`positions` / `normals` / `uvs` / `indices`
+
+`geometry.js` 里的 `createGround` 用最少数据铺出一块草地：4 个顶点、2 个三角形。默认 `size = 24`（演示里常传 `28`）；下面以通用 `size`、半宽 `h = size / 2` 说明。
+
+```js
+export function createGround(size = 24) {
+  const h = size / 2;
+  const positions = [
+    -h, 0, -h,  h, 0, -h,  h, 0, h,  -h, 0, h,
+  ];
+  const normals = [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0];
+  const uvs = [0, 0, size, 0, size, size, 0, size];
+  const indices = [0, 1, 2, 0, 2, 3];
+  return {
+    vertices: interleave(positions, normals, uvs),
+    indices: new Uint16Array(indices),
+    kind: "ground",
+  };
+}
+```
+
+约定坐标系（右手系，与 demo 一致）：**+Y 朝上**，地面躺在 **y = 0** 的 XZ 平面上；人物脚底也在 y=0，所以人站在这块板上。
+
+```text
+        +Y（上）
+         |
+         |
+         o--------→ +X
+        /
+       /
+     +Z（朝向你 / 场景前方，视相机而定）
+```
+
+#### `positions`：四个角在世界局部空间里的坐标
+
+数组按「顶点 0、1、2、3」连续存放，每个顶点 3 个 float `(x, y, z)`：
+
+| 顶点 | 展开后的数 | 坐标 | 空间含义 |
+|---|---|---|---|
+| V0 | `-h, 0, -h` | `(-h, 0, -h)` | 左后角 |
+| V1 | `h, 0, -h` | `(h, 0, -h)` | 右后角 |
+| V2 | `h, 0, h` | `(h, 0, h)` | 右前角 |
+| V3 | `-h, 0, h` | `(-h, 0, h)` | 左前角 |
+
+俯视（从 +Y 往下看）像一块以原点为中心、边长为 `size` 的正方形：
+
+```text
+              -Z
+               ↑
+     V0 ●------+------● V1
+        |      |      |
+        |      |      |
+   -X ←-+------+------+→ +X
+        |      |      |
+        |      |      |
+     V3 ●------+------● V2
+               ↓
+              +Z
+
+边长 = size，中心在原点，全部 y = 0
+```
+
+斜视三维关系（高度全为 0，法线朝上）：
+
+```text
+                 +Y
+                  ↑  n̂ = (0,1,0)
+                  |
+           V3 ●---+---● V2
+             /|   |   |\
+            / |   |   | \
+       V0 ●--+----+---+--● V1   ← 整块板贴在 y=0
+              \   |   /
+               \  |  /
+                \ | /
+                 \|/
+               原点 (0,0,0)
+```
+
+物理意义：这四个点就是 GPU 后面要变换、光栅化的**几何角点**；没有它们，草地就不会占屏幕上的任何像素。
+
+#### `normals`：每个顶点的表面朝向
+
+```js
+normals = [0,1,0,  0,1,0,  0,1,0,  0,1,0];
+```
+
+每个顶点一个 `(nx, ny, nz)`，四个顶点全是 `(0, 1, 0)`——竖直向上。
+
+物理意义：法线告诉片元着色器「这张面朝哪边」，用来算漫反射（光从上方打下来，草地才亮）。平面地面处处朝上，所以四个角共用同一法线。若写成 `(0,-1,0)`，背面朝上，光照会算成「背光」，草地发黑。
+
+不透明 shader 里大致是：
+
+```wgsl
+let n = normalize(in.normal);
+let l = normalize(-u.lightDir.xyz);
+let ndotl = max(dot(n, l), 0.0);  // 法线与光线夹角 → 明暗
+```
+
+#### `uvs`：贴在平面上的二维「纹理坐标」
+
+```js
+uvs = [0, 0,  size, 0,  size, size,  0, size];
+```
+
+每个顶点 2 个 float `(u, v)`，与四角一一对应：
+
+| 顶点 | UV | 含义 |
+|---|---|---|
+| V0 | `(0, 0)` | 纹理空间左下（约定） |
+| V1 | `(size, 0)` | 沿 u 铺开整块边长 |
+| V2 | `(size, size)` | 对角 |
+| V3 | `(0, size)` | 沿 v 铺开 |
+
+物理意义：UV 不是世界坐标，而是给着色器的**二维参数域**。demo 的草地并不采样真实贴图，而是用 `floor(uv * 18.0)` 做程序化格子/噪声草感；把范围设成 `0…size` 而不是 `0…1`，是为了边长变大时草纹密度大致跟着面积走，而不是整块地只铺一格图案。
+
+俯视把 UV 叠在几何上：
+
+```text
+  V0 (u=0,v=0)          V1 (u=size,v=0)
+        ●---------------------●
+        |                     |
+        |     UV 铺满整块地    |
+        |                     |
+        ●---------------------●
+  V3 (u=0,v=size)       V2 (u=size,v=size)
+```
+
+#### `indices`：用哪几个顶点拼三角形
+
+```js
+indices = [0, 1, 2,  0, 2, 3];
+```
+
+GPU 画三角网格时，通常不按「顶点数组顺序」连线，而是看**索引**：每 3 个索引组成一个三角形。
+
+| 三角形 | 索引 | 顶点 | 覆盖区域 |
+|---|---|---|---|
+| T0 | `0, 1, 2` | V0 → V1 → V2 | 正方形的「右后 → 右前」那一半 |
+| T1 | `0, 2, 3` | V0 → V2 → V3 | 剩下的「左」那一半 |
+
+```text
+     V0 ●-----------● V1
+        | ╲    T0   |
+        |   ╲       |
+        | T1  ╲     |
+        |       ╲   |
+     V3 ●-----------● V2
+
+共享对角线：V0 → V2
+```
+
+物理意义：4 个点本身还不是面；两个三角形把正方形「缝」实，光栅化才会生成覆盖草地的片元。索引复用顶点（V0、V2 各出现两次），比再复制一份顶点更省。
+
+绕序 `0→1→2`、`0→2→3` 在 +Y 朝上看是逆时针（或按项目绕序约定），配合管线 `cullMode: "back"`，从上方看得到正面，从地下往上看会被剔掉——符合「地面只朝上」的直觉。
+
+#### 四者如何变成 GPU 顶点缓冲
+
+`interleave` 把每个顶点的 position(3) + normal(3) + uv(2) 交错成一条紧密数组，再配上 `indices`：
+
+```text
+顶点缓冲（交错）:
+  [V0.xyz | V0.n | V0.uv] [V1.xyz | V1.n | V1.uv] ...
+
+索引缓冲:
+  [0, 1, 2, 0, 2, 3]  → 两次 drawIndexed 意义上的两个三角形
+```
+
+**一句话**：`positions` 定角点在哪，`normals` 定面朝哪（光照），`uvs` 定二维参数怎么铺（草纹），`indices` 定哪三个点围成三角形——四者合起来，才是 GPU 能画的那块草地。
+
+### 8.3 `createGpuMesh`：每块网格一对独立显存缓冲
+
+`geometry.js` 只在 **CPU / 系统内存**里算出 `vertices` 与 `indices`；真正进显存、供 `drawIndexed` 使用，靠的是 `mesh.js` 里的 `createGpuMesh`：
+
+```js
+export function createGpuMesh(device, mesh) {
+  const vertexBuffer = device.createBuffer({
+    size: mesh.vertices.byteLength,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+  });
+  device.queue.writeBuffer(vertexBuffer, 0, mesh.vertices);
+
+  const indexBuffer = device.createBuffer({
+    size: mesh.indices.byteLength,
+    usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+  });
+  device.queue.writeBuffer(indexBuffer, 0, mesh.indices);
+
+  return {
+    vertexBuffer,
+    indexBuffer,
+    indexCount: mesh.indices.length,
+    layout: VERTEX_LAYOUT,
+  };
+}
+```
+
+三步：
+
+1. **`createBuffer`**：在显存里申请一块**只属于这次调用**的缓冲；  
+2. **`writeBuffer`**：把 CPU 上的顶点/索引拷进**这一块**；  
+3. **返回句柄**：`vertexBuffer`、`indexBuffer`、`indexCount`，后面画图时拿着引用去绑。
+
+启动时会调用多次：
+
+```js
+const groundMesh = createGpuMesh(device, createGround(28));
+const characterMesh = createGpuMesh(device, characterGeo);
+const weaponMesh = createGpuMesh(device, createWeapon());
+const auraMesh = createGpuMesh(device, createAuraRing());
+```
+
+ 显存里更像：
+
+```text
+显存
+├─ Buffer A  ← ground 顶点
+├─ Buffer B  ← ground 索引
+├─ Buffer C  ← character 顶点
+├─ Buffer D  ← character 索引
+├─ Buffer E  ← weapon 顶点
+└─ ...
+```
+
+可以类比：不是往一个共享分区里乱写同名文件，而是**每个 mesh 各自一个文件**；用的时候打开对应路径。
+
+#### 未来使用时如何区分？
+
+靠 JS 里保存的**不同 `GPUBuffer` 引用**。画之前 `setVertexBuffer` / `setIndexBuffer` 绑哪对，这次 `drawIndexed` 就只读哪对：
+
+```js
+rpass.setVertexBuffer(0, groundMesh.vertexBuffer);
+rpass.setIndexBuffer(groundMesh.indexBuffer, "uint16");
+rpass.drawIndexed(groundMesh.indexCount);
+
+rpass.setVertexBuffer(0, characterMesh.vertexBuffer); // 换绑人物
+rpass.setIndexBuffer(characterMesh.indexBuffer, "uint16");
+rpass.drawIndexed(characterMesh.indexCount);
+```
+
+`setVertexBuffer` / `setIndexBuffer` 会覆盖当前绑定；下一次 draw 只看**当前绑着的那对 buffer**。草地和人物从未挤在同一块显存里靠偏移硬拆。
+
+若以后要「合批」成一个大缓冲，才需要自己用偏移（`setVertexBuffer(slot, buffer, offset, size)`）在同一块里划区间；当前 demo 没有这样做。
+ 

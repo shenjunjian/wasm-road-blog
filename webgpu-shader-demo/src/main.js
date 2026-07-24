@@ -9,12 +9,7 @@ import { createOpaquePipeline } from "./pipelines/opaque.js";
 import { createAuraPipeline } from "./pipelines/aura.js";
 import { createParticleSystem } from "./pipelines/particles.js";
 import { updateSceneTransforms } from "./scene.js";
-import {
-  mat4Perspective,
-  mat4LookAt,
-  mat4Multiply,
-  degToRad,
-} from "./math.js";
+import { mat4Perspective, mat4LookAt, mat4Multiply, degToRad } from "./math.js";
 
 const DEPTH_FORMAT = "depth24plus";
 const CLEAR_COLOR = { r: 0.35, g: 0.55, b: 0.78, a: 1 };
@@ -47,6 +42,13 @@ async function main() {
   });
 
   const context = canvas.getContext("webgpu");
+  /*format 是画布颜色附件的像素格式（GPUTextureFormat），用来告诉 WebGPU：最终画到屏幕上的那张颜色纹理，每个像素怎么存。
+    getPreferredCanvasFormat() 会返回当前平台/浏览器最合适的 canvas 颜色格式，常见是：
+
+    "bgra8unorm"（多数 Windows / macOS）
+    "rgba8unorm"（部分 Linux / Android）
+    也就是：8 位/通道、归一化、不带 sRGB 标记的那一类。
+  */
   const format = navigator.gpu.getPreferredCanvasFormat();
 
   function resize() {
@@ -55,6 +57,7 @@ async function main() {
     const h = Math.floor(canvas.clientHeight * dpr);
     canvas.width = w;
     canvas.height = h;
+    //configure 不只是“登记 device/format”，还会创建/绑定一块固定尺寸的交换链（swap chain）。窗口变大/变小后：会自动更新颜色纹理的大小。
     context.configure({
       device,
       format,
@@ -65,12 +68,14 @@ async function main() {
 
   let { w: width, h: height } = resize();
   window.addEventListener("resize", () => {
-    ({ w: width, h: height } = resize());
+    ({ w: width, h: height } = resize());  // 重复解构赋值，必须要外层的括号
     recreateDepth();
   });
 
   let depthTexture;
   let depthView;
+
+  // 深度纹理也改成同样的新尺寸
   function recreateDepth() {
     if (depthTexture) depthTexture.destroy();
     depthTexture = device.createTexture({
@@ -83,8 +88,7 @@ async function main() {
   recreateDepth();
 
   const groundMesh = createGpuMesh(device, createGround(28));
-  const characterGeo = createCharacter();
-  const characterMesh = createGpuMesh(device, characterGeo);
+  const characterMesh = createGpuMesh(device, createCharacter());
   const weaponMesh = createGpuMesh(device, createWeapon());
   const auraMesh = createGpuMesh(device, createAuraRing());
 
@@ -184,8 +188,16 @@ async function main() {
     fillOpaqueUniform(charUB, viewProj, characterModel, 1, time);
     fillOpaqueUniform(weaponUB, viewProj, weaponModel, 2, time);
 
-    device.queue.writeBuffer(auraUB, 0, buildAuraUniform(viewProj, auraModel, time));
-    device.queue.writeBuffer(auraUB2, 0, buildAuraUniform(viewProj, auraModel2, time + 1.0));
+    device.queue.writeBuffer(
+      auraUB,
+      0,
+      buildAuraUniform(viewProj, auraModel, time),
+    );
+    device.queue.writeBuffer(
+      auraUB2,
+      0,
+      buildAuraUniform(viewProj, auraModel2, time + 1.0),
+    );
 
     // compute sim params: emitter(16) + timeDelta(16) = 32 bytes
     const sim = new Float32Array(8);
