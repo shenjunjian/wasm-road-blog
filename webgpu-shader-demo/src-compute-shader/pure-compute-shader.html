@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGPU GPGPU 通用计算示例</title>
+</head>
+<body>
+<script>
+(async function gpuComputeDemo() {
+    // 1. 检测浏览器是否支持 WebGPU
+    if (!navigator.gpu) {
+        alert("当前浏览器不支持 WebGPU，请使用 Chrome 113+/Edge/Firefox 新版");
+        return;
+    }
+
+    // 2. 获取 GPU 适配器与设备
+    const adapter = await navigator.gpu.requestAdapter();
+    const device = await adapter.requestDevice();
+
+    // --------------------------
+    // 3. 准备CPU输入数据：长度 256 的浮点数组
+    // --------------------------
+    const elementCount = 256;
+    const inputData = new Float32Array(elementCount);
+    for (let i = 0; i < elementCount; i++) {
+        inputData[i] = i; // 填充 0,1,2,...,255
+    }
+
+    // --------------------------
+    // 4. 创建GPU缓冲区
+    // --------------------------
+    // 输入缓冲区：CPU写入，GPU只读
+    const inputBuffer = device.createBuffer({
+        size: inputData.byteLength,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+    });
+    // 将CPU数据拷贝到GPU显存
+    device.queue.writeBuffer(inputBuffer, 0, inputData);
+
+    // 输出缓冲区：GPU读写，最后拷贝回CPU
+    const outputBuffer = device.createBuffer({
+        size: Float32Array.BYTES_PER_ELEMENT, // 仅存1个总和值
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
+    });
+
+    // 回读缓冲区：CPU读取GPU结果
+    const readbackBuffer = device.createBuffer({
+        size: outputBuffer.size,
+        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
+    });
+
+    // --------------------------
+    // 5. WGSL 计算着色器代码（GPGPU核心）
+    // --------------------------
+    const computeShaderCode = `
+        // 存储缓冲区绑定：binding=0输入数组，binding=1输出总和
+        @group(0) @binding(0) var<storage, read> inputArray: array<f32>;
+        @group(0) @binding(1) var<storage, read_write> sumResult: f32;
+
+        // 工作组配置：每组64线程
+        @compute @workgroup_size(64)
+        fn main(@builtin(global_invocation_id) globalId: vec3u) {
+            let idx = globalId.x;
+            let totalLen = arrayLength(&inputArray);
+
+            if (idx >= totalLen) {
+                return; // 超出数组长度直接返回
+            }
+            // 原子累加：多线程安全求和
+            atomicAdd(&sumResult, u32(inputArray[idx]));
+        }
+    `;
+
+    // 创建着色器模块
+    const computeModule = device.createShaderModule({
+        code: computeShaderCode
+    });
+
+    // --------------------------
+    // 6. 创建绑定组布局、绑定组
+    // 告诉GPU缓冲区对应Shader的binding位置
+    // --------------------------
+    const bindGroupLayout = device.createBindGroupLayout({
+        entries: [
+            {
+                binding: 0,
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: { type: "read-only-storage" }
+            },
+            {
+                binding: 1,
+                visibility: GPUShaderStage.COMPUTE,
+                buffer: { type: "storage" }
+            }
+        ]
+    });
+
+    const bindGroup = device.createBindGroup({
+        layout: bindGroupLayout,
+        entries: [
+            { binding: 0, resource: { buffer: inputBuffer } },
+            { binding: 1, resource: { buffer: outputBuffer } }
+        ]
+    });
+
+    // --------------------------
+    // 7. 创建计算管线
+    // --------------------------
+    const computePipeline = device.createComputePipeline({
+        layout: device.createPipelineLayout({
+            bindGroupLayouts: [bindGroupLayout]
+        }),
+        compute: {
+            module: computeModule,
+            entryPoint: "main"
+        }
+    });
+
+    // --------------------------
+    // 8. 录制GPU命令并提交执行
+    // --------------------------
+    const commandEncoder = device.createCommandEncoder();
+    const passEncoder = commandEncoder.beginComputePass();
+
+    passEncoder.setPipeline(computePipeline);
+    passEncoder.setBindGroup(0, bindGroup);
+    // 调度线程网格：总元素256 / 每组64线程 = 4个工作组
+    passEncoder.dispatchWorkgroups(4);
+    passEncoder.end();
+
+    // 将GPU输出缓冲区数据拷贝到CPU可读缓冲区
+    commandEncoder.copyBufferToBuffer(
+        outputBuffer, 0,
+        readbackBuffer, 0,
+        outputBuffer.size
+    );
+
+    // 提交所有命令到GPU队列执行
+    const commands = commandEncoder.finish();
+    device.queue.submit([commands]);
+
+    // --------------------------
+    // 9. 等待GPU计算完成，读取结果
+    // --------------------------
+    await readbackBuffer.mapAsync(GPUMapMode.READ);
+    const resultArray = new Float32Array(readbackBuffer.getMappedRange());
+    const gpuSum = resultArray[0];
+
+ 
+
+    console.log("==== WebGPU 通用计算结果 ====");
+    console.log("GPU并行求和结果：", gpuSum);
+ 
+    // 释放内存
+    readbackBuffer.unmap();
+})();
+</script>
+</body>
+</html>

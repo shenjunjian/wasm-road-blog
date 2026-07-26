@@ -13,7 +13,7 @@ import { VERTEX_LAYOUT } from "../geometry.js";
  * @returns {GPURenderPipeline} 不透明渲染管线
  */
 export function createOpaquePipeline(device, format, depthFormat) {
-  const module = device.createShaderModule({ code: opaqueCode });
+  const module = device.createShaderModule({ code: opaqueCode });   
   return device.createRenderPipeline({
     layout: "auto",
     vertex: {
