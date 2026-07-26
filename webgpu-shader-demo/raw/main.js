@@ -25,6 +25,7 @@ function writeMat4(dst, offset, m) {
 }
 
 async function main() {
+  /** @type {HTMLCanvasElement} */
   const canvas = document.getElementById("gpu-canvas");
   if (!navigator.gpu) {
     showError("当前浏览器不支持 WebGPU。请使用最新版 Chrome 或 Edge。");
@@ -238,16 +239,16 @@ async function main() {
 
     // 1) Compute particles
     {
-      const cpass = encoder.beginComputePass();
-      cpass.setPipeline(particles.computePipeline);
-      cpass.setBindGroup(0, particles.computeBindGroup);
-      cpass.dispatchWorkgroups(Math.ceil(particles.count / 64));
-      cpass.end();
+      const computePass = encoder.beginComputePass();
+      computePass.setPipeline(particles.computePipeline);
+      computePass.setBindGroup(0, particles.computeBindGroup);
+      computePass.dispatchWorkgroups(Math.ceil(particles.count / 64));
+      computePass.end();
     }
 
     // 2) Render: opaque then transparent
     const colorView = context.getCurrentTexture().createView();
-    const rpass = encoder.beginRenderPass({
+    const renderPass = encoder.beginRenderPass({
       colorAttachments: [
         {
           view: colorView,
@@ -264,36 +265,36 @@ async function main() {
       },
     });
 
-    rpass.setPipeline(opaquePipeline);
+    renderPass.setPipeline(opaquePipeline);
 
-    rpass.setBindGroup(0, groundBG);
-    rpass.setVertexBuffer(0, groundMesh.vertexBuffer);
-    rpass.setIndexBuffer(groundMesh.indexBuffer, "uint16");
-    rpass.drawIndexed(groundMesh.indexCount);
+    renderPass.setBindGroup(0, groundBG);
+    renderPass.setVertexBuffer(0, groundMesh.vertexBuffer);
+    renderPass.setIndexBuffer(groundMesh.indexBuffer, "uint16");
+    renderPass.drawIndexed(groundMesh.indexCount);
 
-    rpass.setBindGroup(0, charBG);
-    rpass.setVertexBuffer(0, characterMesh.vertexBuffer);
-    rpass.setIndexBuffer(characterMesh.indexBuffer, "uint16");
-    rpass.drawIndexed(characterMesh.indexCount);
+    renderPass.setBindGroup(0, charBG);
+    renderPass.setVertexBuffer(0, characterMesh.vertexBuffer);
+    renderPass.setIndexBuffer(characterMesh.indexBuffer, "uint16");
+    renderPass.drawIndexed(characterMesh.indexCount);
 
-    rpass.setBindGroup(0, weaponBG);
-    rpass.setVertexBuffer(0, weaponMesh.vertexBuffer);
-    rpass.setIndexBuffer(weaponMesh.indexBuffer, "uint16");
-    rpass.drawIndexed(weaponMesh.indexCount);
+    renderPass.setBindGroup(0, weaponBG);
+    renderPass.setVertexBuffer(0, weaponMesh.vertexBuffer);
+    renderPass.setIndexBuffer(weaponMesh.indexBuffer, "uint16");
+    renderPass.drawIndexed(weaponMesh.indexCount);
 
-    rpass.setPipeline(auraPipeline);
-    rpass.setBindGroup(0, auraBG);
-    rpass.setVertexBuffer(0, auraMesh.vertexBuffer);
-    rpass.setIndexBuffer(auraMesh.indexBuffer, "uint16");
-    rpass.drawIndexed(auraMesh.indexCount);
-    rpass.setBindGroup(0, auraBG2);
-    rpass.drawIndexed(auraMesh.indexCount);
+    renderPass.setPipeline(auraPipeline);
+    renderPass.setBindGroup(0, auraBG);
+    renderPass.setVertexBuffer(0, auraMesh.vertexBuffer);
+    renderPass.setIndexBuffer(auraMesh.indexBuffer, "uint16");
+    renderPass.drawIndexed(auraMesh.indexCount);
+    renderPass.setBindGroup(0, auraBG2);
+    renderPass.drawIndexed(auraMesh.indexCount);
 
-    rpass.setPipeline(particles.renderPipeline);
-    rpass.setBindGroup(0, particles.renderBindGroup);
-    rpass.draw(6, particles.count);
+    renderPass.setPipeline(particles.renderPipeline);
+    renderPass.setBindGroup(0, particles.renderBindGroup);
+    renderPass.draw(6, particles.count);
 
-    rpass.end();
+    renderPass.end();
     device.queue.submit([encoder.finish()]);
     requestAnimationFrame(frame);
   }
