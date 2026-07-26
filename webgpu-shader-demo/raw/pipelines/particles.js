@@ -67,7 +67,6 @@ export function createParticleSystem(device, format, depthFormat) {
   });
 
 
-  const particleBuffer = createUniformBuffer(device, particleBytes);
   const computeModule = device.createShaderModule({ code: computeCode });
   const renderModule = device.createShaderModule({ code: renderCode });
 

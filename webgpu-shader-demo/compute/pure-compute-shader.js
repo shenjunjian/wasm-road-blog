@@ -1,5 +1,6 @@
 /**
  * WebGPU GPGPU 通用计算示例：对长度为 256 的浮点数组做并行求和。
+ * 流程按「从上到下」书写，方便初学者顺着读一遍。
  * @module pure-compute-shader
  */
 
@@ -35,25 +36,34 @@ const COMPUTE_SHADER_CODE = `
 `;
 
 /**
- * 生成 CPU 侧输入数据：0, 1, 2, ..., n-1。
- * @param {number} count 元素个数
- * @returns {Float32Array}
+ * 示例入口：检测 WebGPU → 建缓冲 → 跑计算着色器 → 打印 GPU 求和结果。
+ * @returns {Promise<void>}
  */
-function createInputData(count) {
-  const inputData = new Float32Array(count);
-  for (let i = 0; i < count; i++) {
+async function gpuComputeDemo() {
+  // ---------- 1. 检测并初始化 WebGPU ----------
+  if (!navigator.gpu) {
+    alert("当前浏览器不支持 WebGPU，请使用 Chrome 113+/Edge/Firefox 新版");
+    return;
+  }
+
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) {
+    alert("无法获取 GPUAdapter");
+    return;
+  }
+
+  const device = await adapter.requestDevice();
+  device.addEventListener("uncapturederror", (event) => {
+    console.error("WebGPU uncaptured error:", event.error);
+  });
+
+  // ---------- 2. 准备 CPU 侧输入数据：0, 1, 2, ..., n-1 ----------
+  const inputData = new Float32Array(ELEMENT_COUNT);
+  for (let i = 0; i < ELEMENT_COUNT; i++) {
     inputData[i] = i;
   }
-  return inputData;
-}
 
-/**
- * 创建输入 / 输出 / 回读三类 GPU 缓冲区，并把输入数据写入显存。
- * @param {GPUDevice} device
- * @param {Float32Array} inputData
- * @returns {{ inputBuffer: GPUBuffer, outputBuffer: GPUBuffer, readbackBuffer: GPUBuffer }}
- */
-function createBuffers(device, inputData) {
+  // ---------- 3. 创建 GPU 缓冲区，并把输入数据写入显存 ----------
   /** @type {GPUBuffer} 输入缓冲区：CPU 写入，GPU 只读 */
   const inputBuffer = device.createBuffer({
     size: inputData.byteLength,
@@ -74,24 +84,18 @@ function createBuffers(device, inputData) {
   // 【向显存写数据】CPU → 显存：把 outputBuffer 初值清零
   device.queue.writeBuffer(outputBuffer, 0, new Uint32Array([0]));
 
-
   /** @type {GPUBuffer} 回读缓冲区：CPU 映射读取 GPU 结果 */
   const readbackBuffer = device.createBuffer({
     size: outputBuffer.size,
     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
   });
 
-  return { inputBuffer, outputBuffer, readbackBuffer };
-}
+  // ---------- 4. 创建着色器模块 ----------
+  const computeModule = device.createShaderModule({
+    code: COMPUTE_SHADER_CODE,
+  });
 
-/**
- * 创建绑定组布局与绑定组，将缓冲区挂到着色器 binding。
- * @param {GPUDevice} device
- * @param {GPUBuffer} inputBuffer
- * @param {GPUBuffer} outputBuffer
- * @returns {{ bindGroupLayout: GPUBindGroupLayout, bindGroup: GPUBindGroup }}
- */
-function createBindGroupResources(device, inputBuffer, outputBuffer) {
+  // ---------- 5. 创建绑定组布局与绑定组，将缓冲区挂到着色器 binding ----------
   const bindGroupLayout = device.createBindGroupLayout({
     entries: [
       {
@@ -115,18 +119,8 @@ function createBindGroupResources(device, inputBuffer, outputBuffer) {
     ],
   });
 
-  return { bindGroupLayout, bindGroup };
-}
-
-/**
- * 创建计算管线。
- * @param {GPUDevice} device
- * @param {GPUBindGroupLayout} bindGroupLayout
- * @param {GPUShaderModule} computeModule
- * @returns {GPUComputePipeline}
- */
-function createComputePipeline(device, bindGroupLayout, computeModule) {
-  return device.createComputePipeline({
+  // ---------- 6. 创建计算管线 ----------
+  const computePipeline = device.createComputePipeline({
     layout: device.createPipelineLayout({
       bindGroupLayouts: [bindGroupLayout],
     }),
@@ -135,32 +129,17 @@ function createComputePipeline(device, bindGroupLayout, computeModule) {
       entryPoint: "main",
     },
   });
-}
 
-/**
- * 录制并提交计算命令：dispatch 工作组，再把结果拷到回读缓冲。
- * @param {GPUDevice} device
- * @param {GPUComputePipeline} computePipeline
- * @param {GPUBindGroup} bindGroup
- * @param {GPUBuffer} outputBuffer
- * @param {GPUBuffer} readbackBuffer
- * @param {number} workgroupCount 工作组数量
- * @returns {void}
- */
-function submitCompute(
-  device,
-  computePipeline,
-  bindGroup,
-  outputBuffer,
-  readbackBuffer,
-  workgroupCount,
-) {
+  // ---------- 7. 录制并提交计算命令 ----------
+  const workgroupCount = Math.ceil(ELEMENT_COUNT / WORKGROUP_SIZE);
   const commandEncoder = device.createCommandEncoder();
   const passEncoder = commandEncoder.beginComputePass();
 
-  // setPipeline / setBindGroup 属于 配置命令，不是 数据上传；
+  // setPipeline / setBindGroup 属于配置命令，不是数据上传；
   passEncoder.setPipeline(computePipeline);
-  // bindGroup 里挂的是 buffer 句柄/引用，不是要把整份数据再传一遍。数据早在 createBuffers 里的两行 writeBuffer 就已经进显存了；setBindGroup 只是把「资源槽位 → buffer」的对应关系记进当前 compute pass 的命令流里。
+  // bindGroup 里挂的是 buffer 句柄/引用，不是要把整份数据再传一遍。
+  // 数据早在上面的 writeBuffer 就已经进显存了；
+  // setBindGroup 只是把「资源槽位 → buffer」的对应关系记进当前 compute pass 的命令流里。
   passEncoder.setBindGroup(0, bindGroup);
   passEncoder.dispatchWorkgroups(workgroupCount);
   passEncoder.end();
@@ -175,76 +154,13 @@ function submitCompute(
   );
 
   device.queue.submit([commandEncoder.finish()]);
-}
 
-/**
- * 映射回读缓冲区并取出求和结果。
- * @param {GPUBuffer} readbackBuffer
- * @returns {Promise<number>}
- */
-async function readGpuSum(readbackBuffer) {
+  // ---------- 8. 映射回读缓冲区，取出求和结果 ----------
   await readbackBuffer.mapAsync(GPUMapMode.READ);
   // 与着色器 atomic<u32> 对应，按 u32 回读
   const resultArray = new Uint32Array(readbackBuffer.getMappedRange());
   const gpuSum = resultArray[0];
   readbackBuffer.unmap();
-  return gpuSum;
-}
-
-/**
- * 示例入口：检测 WebGPU → 建缓冲 → 跑计算着色器 → 打印 GPU 求和结果。
- * @returns {Promise<void>}
- */
-async function gpuComputeDemo() {
-  if (!navigator.gpu) {
-    alert("当前浏览器不支持 WebGPU，请使用 Chrome 113+/Edge/Firefox 新版");
-    return;
-  }
-
-  const adapter = await navigator.gpu.requestAdapter();
-  if (!adapter) {
-    alert("无法获取 GPUAdapter");
-    return;
-  }
-
-  const device = await adapter.requestDevice();
-  device.addEventListener("uncapturederror", (event) => {
-    console.error("WebGPU uncaptured error:", event.error);
-  });
-
-  const inputData = createInputData(ELEMENT_COUNT);
-  const { inputBuffer, outputBuffer, readbackBuffer } = createBuffers(
-    device,
-    inputData,
-  );
-
-  const computeModule = device.createShaderModule({
-    code: COMPUTE_SHADER_CODE,
-  });
-
-  const { bindGroupLayout, bindGroup } = createBindGroupResources(
-    device,
-    inputBuffer,
-    outputBuffer,
-  );
-
-  const computePipeline = createComputePipeline(
-    device,
-    bindGroupLayout,
-    computeModule,
-  );
-
-  const workgroupCount = Math.ceil(ELEMENT_COUNT / WORKGROUP_SIZE);
-  submitCompute(
-    device,
-    computePipeline,
-    bindGroup,
-    outputBuffer,
-    readbackBuffer,
-    workgroupCount,
-  );
-
-  const gpuSum = await readGpuSum(readbackBuffer);
 
   document.write(`<p>GPU并行求和结果：${gpuSum}</p>`);
 }
