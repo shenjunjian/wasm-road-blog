@@ -16,8 +16,9 @@ const WORKGROUP_SIZE = 64;
  */
 const COMPUTE_SHADER_CODE = `
   // 存储缓冲区绑定：binding=0输入数组，binding=1输出总和
+  // atomicAdd 只能作用于 atomic<u32>/atomic<i32>，不能直接对 f32 使用
   @group(0) @binding(0) var<storage, read> inputArray: array<f32>;
-  @group(0) @binding(1) var<storage, read_write> sumResult: f32;
+  @group(0) @binding(1) var<storage, read_write> sumResult: atomic<u32>;
 
   // 工作组配置：每组64线程
   @compute @workgroup_size(64)
@@ -28,7 +29,7 @@ const COMPUTE_SHADER_CODE = `
     if (idx >= totalLen) {
       return; // 超出数组长度直接返回
     }
-    // 原子累加：多线程安全求和
+    // 原子累加：多线程安全求和（本示例输入为 0..n-1 的整数，可安全转成 u32）
     atomicAdd(&sumResult, u32(inputArray[idx]));
   }
 `;
@@ -60,11 +61,18 @@ function createBuffers(device, inputData) {
   });
   device.queue.writeBuffer(inputBuffer, 0, inputData);
 
-  /** @type {GPUBuffer} 输出缓冲区：GPU 读写，最后拷贝回 CPU */
+  /** @type {GPUBuffer} 输出缓冲区：GPU 读写，最后拷贝回 CPU（atomic<u32>） */
   const outputBuffer = device.createBuffer({
-    size: Float32Array.BYTES_PER_ELEMENT,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+    size: Uint32Array.BYTES_PER_ELEMENT,
+    // COPY_DST：允许 writeBuffer 清零；COPY_SRC：拷到 readback
+    usage:
+      GPUBufferUsage.STORAGE |
+      GPUBufferUsage.COPY_SRC |
+      GPUBufferUsage.COPY_DST,
   });
+  // 显式清零，避免未定义初值
+  device.queue.writeBuffer(outputBuffer, 0, new Uint32Array([0]));
+
 
   /** @type {GPUBuffer} 回读缓冲区：CPU 映射读取 GPU 结果 */
   const readbackBuffer = device.createBuffer({
@@ -172,7 +180,8 @@ function submitCompute(
  */
 async function readGpuSum(readbackBuffer) {
   await readbackBuffer.mapAsync(GPUMapMode.READ);
-  const resultArray = new Float32Array(readbackBuffer.getMappedRange());
+  // 与着色器 atomic<u32> 对应，按 u32 回读
+  const resultArray = new Uint32Array(readbackBuffer.getMappedRange());
   const gpuSum = resultArray[0];
   readbackBuffer.unmap();
   return gpuSum;
@@ -195,6 +204,10 @@ async function gpuComputeDemo() {
   }
 
   const device = await adapter.requestDevice();
+  device.addEventListener("uncapturederror", (event) => {
+    console.error("WebGPU uncaptured error:", event.error);
+  });
+
   const inputData = createInputData(ELEMENT_COUNT);
   const { inputBuffer, outputBuffer, readbackBuffer } = createBuffers(
     device,
@@ -229,8 +242,7 @@ async function gpuComputeDemo() {
 
   const gpuSum = await readGpuSum(readbackBuffer);
 
-  console.log("==== WebGPU 通用计算结果 ====");
-  console.log("GPU并行求和结果：", gpuSum);
+  document.write(`<p>GPU并行求和结果：${gpuSum}</p>`);
 }
 
 gpuComputeDemo();
