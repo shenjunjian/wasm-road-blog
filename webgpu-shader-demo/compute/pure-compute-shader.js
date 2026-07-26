@@ -29,7 +29,7 @@ const COMPUTE_SHADER_CODE = `
     if (idx >= totalLen) {
       return; // 超出数组长度直接返回
     }
-    // 原子累加：多线程安全求和（本示例输入为 0..n-1 的整数，可安全转成 u32）
+    // 【向显存写数据】GPU 侧：原子累加写入 outputBuffer（sumResult）
     atomicAdd(&sumResult, u32(inputArray[idx]));
   }
 `;
@@ -59,6 +59,7 @@ function createBuffers(device, inputData) {
     size: inputData.byteLength,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
+  // 【向显存写数据】CPU → 显存：上传输入数组到 inputBuffer
   device.queue.writeBuffer(inputBuffer, 0, inputData);
 
   /** @type {GPUBuffer} 输出缓冲区：GPU 读写，最后拷贝回 CPU（atomic<u32>） */
@@ -70,7 +71,7 @@ function createBuffers(device, inputData) {
       GPUBufferUsage.COPY_SRC |
       GPUBufferUsage.COPY_DST,
   });
-  // 显式清零，避免未定义初值
+  // 【向显存写数据】CPU → 显存：把 outputBuffer 初值清零
   device.queue.writeBuffer(outputBuffer, 0, new Uint32Array([0]));
 
 
@@ -157,11 +158,14 @@ function submitCompute(
   const commandEncoder = device.createCommandEncoder();
   const passEncoder = commandEncoder.beginComputePass();
 
+  // setPipeline / setBindGroup 属于 配置命令，不是 数据上传；
   passEncoder.setPipeline(computePipeline);
+  // bindGroup 里挂的是 buffer 句柄/引用，不是要把整份数据再传一遍。数据早在 createBuffers 里的两行 writeBuffer 就已经进显存了；setBindGroup 只是把「资源槽位 → buffer」的对应关系记进当前 compute pass 的命令流里。
   passEncoder.setBindGroup(0, bindGroup);
   passEncoder.dispatchWorkgroups(workgroupCount);
   passEncoder.end();
 
+  // 【向显存写数据】GPU → GPU：把 outputBuffer 拷到 readbackBuffer
   commandEncoder.copyBufferToBuffer(
     outputBuffer,
     0,
