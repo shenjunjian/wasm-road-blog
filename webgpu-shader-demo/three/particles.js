@@ -18,7 +18,7 @@ import {
   smoothstep,
 } from "three/tsl";
 
-export const PARTICLE_COUNT = 4096;
+export const PARTICLE_COUNT = 46;
 
 /**
  * Head-emitter particles updated by TSL compute (same behavior as raw WGSL).

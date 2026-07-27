@@ -2,7 +2,7 @@ import computeCode from "../shaders/particles_compute.wgsl?raw";
 import renderCode from "../shaders/particles_render.wgsl?raw";
 
 /** 同时存活/模拟的粒子上限（与 compute dispatch、render instance 数一致）。 */
-export const PARTICLE_COUNT = 4096;
+export const PARTICLE_COUNT = 46;
 
 /**
  * 单粒子在 storage buffer 中的 float 数：
