@@ -1189,3 +1189,243 @@ main.js:      setBindGroup(0, …)  entries[{ binding: 0, buffer: *UB }]
 
 草地 / 人物 / 武器共用同一份 `opaque.wgsl` 与同一条 `opaquePipeline`，靠**不同的 uniform 缓冲 + 不同的 bind group** 切换 `model` 与 `materialKind`；`setBindGroup(0, …)` 就是在换「当前 `u` 指向哪块缓冲」。
 
+### 8.5 `depthTexture` / `depthView` 与 `beginRenderPass`
+
+#### 先消一个术语误会：这是「纹理 / 附件」，不是「材质」
+
+英文 `Texture` / 类型名 `GPUTexture` 应译作**纹理**，不要和 **材质（Material）** 混用：
+
+| 概念 | 是什么 | 附着在哪 |
+|---|---|---|
+| **材质 Material** | 表面怎么着色：基色、光照模型、shader 参数（demo 里接近 `materialKind` + tint + 管线） | 概念上挂在**网格 / 物体**上 |
+| **纹理 Texture** | 显存里一块按像素排列的数据表（颜色、深度、法线贴图……） | 可以是物体贴图，也可以是**整屏的画布/深度缓冲** |
+
+`context.getCurrentTexture()` 与 `depthTexture` 都属于后者，而且用途更具体：它们是 **Render Pass 的附件（attachment）**——整帧共用的「画纸」和「深度表」，**不是**贴在草地/人物身上的那张图。
+
+```text
+物体（网格）──材质/着色──→ 算出某个屏幕像素的颜色与深度
+                              │
+                              ▼
+              ┌─ colorTexture（getCurrentTexture）：整屏颜色画纸
+              └─ depthTexture：整屏深度表（每个像素一个「目前最近有多远」）
+```
+
+所以你会觉得「没附着在任何物体上」——对，它们本来就不是物体资源，而是**这一帧整张画面**的输出目标。草地、人、剑、环、粒子依次往这两块「整屏缓冲」里写；谁挡住谁，靠深度表里已有的值来判。
+
+深度测试也**不是**「拿 depthView 这块材质去和另一块材质比」：
+
+1. 片元带着自己的深度 `z`（由 VS 的 `@builtin(position)` 经视口变换得到）；
+2. GPU 用片元的屏幕坐标 `(x, y)` 去 **depthTexture 里读出该像素当前存着的深度**；
+3. 按管线的 `depthCompare`（demo 为 `"less"`）比较：`z` 更近则通过，并可把新 `z` 写回同一像素。
+
+`depthView` 只是这块整屏深度表的访问句柄；比较的两端是 **「当前片元的 z」** 与 **「该像素里已经记下的 z」**，全程只有这一张深度纹理。
+
+颜色附件每帧从交换链拿（`getCurrentTexture()`）；深度附件则是应用自己在显存里建、自己管生命周期的纹理。demo 在启动与窗口缩放时走同一条路径：
+
+```js
+let depthTexture;
+let depthView;
+
+function recreateDepth() {
+  if (depthTexture) depthTexture.destroy();
+  depthTexture = device.createTexture({
+    size: [canvas.width, canvas.height],
+    format: DEPTH_FORMAT,                 // "depth24plus"
+    usage: GPUTextureUsage.RENDER_ATTACHMENT,
+  });
+  depthView = depthTexture.createView();
+}
+recreateDepth();
+```
+
+#### `depthTexture`：深度缓冲本体
+
+`GPUTexture`，存在显存里，每个像素存一个深度值（本 demo 格式 `"depth24plus"`，约 24 位深度）。
+
+| 字段 | demo 取值 | 含义 |
+|---|---|---|
+| `size` | `[canvas.width, canvas.height]` | 必须与颜色附件同分辨率，否则 `beginRenderPass` 校验失败 |
+| `format` | `DEPTH_FORMAT`（`"depth24plus"`） | 只存深度，不进屏幕；须与管线 `depthStencil.format` 一致 |
+| `usage` | `RENDER_ATTACHMENT` | 声明「只当渲染附件用」，不做采样/拷贝 |
+
+它回答的是：**这一帧每个采样点目前最近的可见深度是多少**。片元通过深度测试后，若不透明管线开了 `depthWriteEnabled`，就会把新深度写回这块纹理。
+
+缩放时旧纹理尺寸作废，所以要先 `destroy()` 再按新宽高重建——否则颜色交换链已是新尺寸，深度还是旧尺寸，Render Pass 挂掉。
+
+#### `depthView`：交给 Render Pass 的「窗口」
+
+`beginRenderPass` **不直接吃 `GPUTexture`**，只吃 `GPUTextureView`。`createView()` 在默认参数下就是「整张纹理、全部 mip / 层」的视图。
+
+对应关系：
+
+```text
+depthTexture（GPUTexture，显存里的深度缓冲）
+      │
+      └─ createView() → depthView（GPUTextureView）
+                              │
+                              └─ depthStencilAttachment.view ← beginRenderPass 绑这里
+```
+
+颜色侧同理：`context.getCurrentTexture()` 拿到本帧可呈现的 `GPUTexture`，再 `createView()` 得到 `colorView`。区别只在于——颜色纹理由交换链按帧发放；深度纹理由我们自己持有，跨帧复用，直到 `recreateDepth`。
+
+demo 把 `depthView` 缓存起来，resize 时随纹理一起换；每帧 Render Pass 直接用这份 view，不必每帧 `createView()`（规范上每帧新建也可以，语义一样）。
+
+#### `encoder.beginRenderPass({ … })`：声明「往哪写、开场怎么清」
+
+管线决定「怎么画」（shader、深度比较、混合）；Render Pass 决定「画到哪张附件上、pass 开始时附件里已有什么」。demo 每帧：
+
+```js
+const colorView = context.getCurrentTexture().createView();
+const renderPass = encoder.beginRenderPass({
+  colorAttachments: [
+    {
+      view: colorView,
+      clearValue: CLEAR_COLOR,   // { r: 0.35, g: 0.55, b: 0.78, a: 1 }
+      loadOp: "clear",
+      storeOp: "store",
+    },
+  ],
+  depthStencilAttachment: {
+    view: depthView,
+    depthClearValue: 1,
+    depthLoadOp: "clear",
+    depthStoreOp: "store",
+  },
+});
+```
+
+**`colorAttachments`（颜色附件数组）**
+
+对应管线 `fragment.targets`：下标 `0` 就是 FS 的 `@location(0)`。本 demo 只有一个颜色目标。
+
+| 字段 | demo | 作用 |
+|---|---|---|
+| `view` | `colorView` | 本帧要写入的颜色纹理视图（交换链当前纹理） |
+| `clearValue` | 天空蓝 `CLEAR_COLOR` | 仅当 `loadOp === "clear"` 时生效：pass 开始先整屏刷成该色 |
+| `loadOp` | `"clear"` | 开场如何对待附件已有内容：`"clear"` 清成 `clearValue`；`"load"` 保留上一帧/上一 pass 的内容；`"dont-care"` 不保证内容 |
+| `storeOp` | `"store"` | pass 结束是否写回显存：`"store"` 保留结果供呈现或后续 pass；`"discard"` 可丢（省带宽，本 demo 颜色必须 store 才能上屏） |
+
+**`depthStencilAttachment`（深度/模板附件，可选但本场景必需）**
+
+| 字段 | demo | 作用 |
+|---|---|---|
+| `view` | `depthView` | 深度测试读写的那块缓冲 |
+| `depthClearValue` | `1` | 与 `depthLoadOp: "clear"` 配套。WebGPU 深度常用 **0 近 1 远**；清成 `1` 表示「全屏最远、尚无遮挡」 |
+| `depthLoadOp` | `"clear"` | 每帧从「空场景」重新测遮挡；若 `"load"` 会沿用上一帧深度，遮挡会错乱 |
+| `depthStoreOp` | `"store"` | 本 pass 内多次 draw 要共用同一份深度（草地写完，人/剑才能被挡住）。单 pass、结束后不再读深度时也可 `"discard"`，demo 用 `store` 语义更直观 |
+
+本 demo未开模板测试，故没有 `stencilLoadOp` / `stencilStoreOp` / `stencilClearValue`；若管线启用了 stencil，这些字段会变成必填。
+
+**和管线状态怎么分工**
+
+```text
+beginRenderPass
+  ├─ 绑哪些附件（colorView / depthView）
+  └─ 开场清不清、结束存不存
+
+createRenderPipeline → depthStencil
+  ├─ format 是否匹配 depthTexture
+  ├─ depthCompare: "less"（更近者胜）
+  └─ depthWriteEnabled: true/false（不透明写、半透明不写）
+```
+
+Pass 负责「场地」；Pipeline 负责「在这块场地上怎么比深度、写不写深度」。两者 `format` 必须对齐（见 8.1 的 `DEPTH_FORMAT`）。
+
+**一句话**：`depthTexture` 是显存里的深度缓冲，`depthView` 是把它挂进 Render Pass 的视图；`beginRenderPass` 用 `colorAttachments` / `depthStencilAttachment` 声明本 pass 的读写目标，以及用 `loadOp`/`storeOp`（及对应的 clear 值）规定开场清空与结束保留策略。
+
+#### 补充：WebGPU 原生没有 `Material`，要自己拼
+
+Three.js / Babylon 里有 `new MeshStandardMaterial({ map })`；**WebGPU 规范里没有 `GPUMaterial` 这类 API**。所谓「材质」，在原生层通常拆成三块自己组装：
+
+| 引擎里的「材质」 | WebGPU 里对应什么 |
+|---|---|
+| 着色逻辑（PBR / 无光照 / 加色半透明） | `GPUShaderModule`（WGSL）+ `GPURenderPipeline`（深度写、混合、剔除等状态） |
+| 贴图、颜色、金属度等参数 | `GPUTexture` + `GPUSampler` + `GPUBuffer`（uniform），再打成 `GPUBindGroup` |
+| 挂到某个物体上 | 画该网格前：`setPipeline` + `setBindGroup` + `setVertexBuffer` / `setIndexBuffer` + `drawIndexed` |
+
+本 demo 的「材质」其实已经用最小形态出现了：同一条 `opaquePipeline` + 不同 bind group 里的 `materialKind` / tint——只是草地颜色是程序化算的，**没有从文件加载漫反射贴图**。
+
+**什么文件能变成「材质用的贴图」？**
+
+WebGPU 本身不解析 `.mtl` / `.mat`；它认的是「能拷进 `GPUTexture` 的像素源」。常见路径：
+
+| 来源 | 典型文件 / API | 怎么进 GPU |
+|---|---|---|
+| 位图 | `.png` / `.jpg` / `.webp` / `.bmp` 等 | `fetch` → `blob` → `createImageBitmap` → `copyExternalImageToTexture` |
+| 画布 / 视频帧 | `HTMLCanvasElement`、`OffscreenCanvas`、`VideoFrame` | 同样走 `copyExternalImageToTexture` |
+| HDR / 压缩纹理 | `.hdr`、`.ktx2`、Basis 等 | **规范不内置解码**；用库解成像素或 GPU 压缩格式后再 `writeTexture` / 拷贝 |
+| glTF 材质 | `.gltf` / `.glb` 里的 `pbrMetallicRoughness` + 贴图 URI | 自己或加载器读 JSON/二进制，把 baseColor 图等按上表上传，再按金属度/粗糙度填 uniform |
+
+「加载为 Material」在原生里更准确的说法是：**加载贴图与参数 → 填进 bind group → 搭配某条管线**，而不是 `createMaterial(file)`。
+
+**最小示例：从 PNG 做出「带贴图的材质」，并画到一个网格上**
+
+```js
+// ① 文件 → GPUTexture（漫反射贴图）
+async function loadColorTexture(device, url) {
+  const res = await fetch(url);
+  const bitmap = await createImageBitmap(await res.blob());
+  const texture = device.createTexture({
+    size: [bitmap.width, bitmap.height],
+    format: "rgba8unorm",
+    usage:
+      GPUTextureUsage.TEXTURE_BINDING | // shader 里采样
+      GPUTextureUsage.COPY_DST,         // 允许从 ImageBitmap 写入
+  });
+  device.queue.copyExternalImageToTexture(
+    { source: bitmap },
+    { texture },
+    [bitmap.width, bitmap.height],
+  );
+  bitmap.close();
+  return texture;
+}
+
+const albedo = await loadColorTexture(device, "/assets/grass.png");
+const sampler = device.createSampler({
+  magFilter: "linear",
+  minFilter: "linear",
+  addressModeU: "repeat",
+  addressModeV: "repeat",
+});
+
+// ② WGSL：材质 = 采样贴图 × 光照（示意）
+// @group(0) @binding(0) var<uniform> u: Uniforms;
+// @group(0) @binding(1) var albedoTex: texture_2d<f32>;
+// @group(0) @binding(2) var albedoSamp: sampler;
+// … fs 里：textureSample(albedoTex, albedoSamp, uv) …
+
+// ③ 管线 + bind group = 引擎里那份 Material 实例
+const texturedPipeline = device.createRenderPipeline({ /* layout/auto, vs/fs, depthStencil… */ });
+const materialBG = device.createBindGroup({
+  layout: texturedPipeline.getBindGroupLayout(0),
+  entries: [
+    { binding: 0, resource: { buffer: modelUniform } },
+    { binding: 1, resource: albedo.createView() },
+    { binding: 2, resource: sampler },
+  ],
+});
+
+// ④ 应用到「物体」= 画这个网格时挂上这份材质
+renderPass.setPipeline(texturedPipeline);
+renderPass.setBindGroup(0, materialBG);          // ← 换材质 = 换 bind group（或换管线）
+renderPass.setVertexBuffer(0, mesh.vertexBuffer);
+renderPass.setIndexBuffer(mesh.indexBuffer, "uint16");
+renderPass.drawIndexed(mesh.indexCount);
+```
+
+对应心智图：
+
+```text
+grass.png  ──upload──→  GPUTexture + Sampler
+                              │
+WGSL + Pipeline  ─────────────┼──→  BindGroup  ≈ 一份 Material 实例
+                              │
+网格 VB/IB  ──────────────────┴──→  setPipeline + setBindGroup + drawIndexed
+                                         ≈ 把材质应用到该物体
+```
+
+同一条管线、多份 bind group（不同贴图 / 不同 tint），就是多个「材质实例」合批；混合模式或深度写入策略不同，才需要再拆一条 `GPURenderPipeline`（本 demo 的 opaque / aura / particles 就是这样拆的）。
+
+**和本 demo 的关系**：当前草地不采样 PNG，而是在 FS 里用 UV 程序化着色——那也是一种材质，只是「贴图」换成了数学。若要改成真贴图草地，按上表把 `grass.png` 绑进 bind group，并在 `opaque.wgsl` 的 FS 里加 `textureSample` 即可；**不必**也不存在调用 `device.createMaterial(...)`。
+
