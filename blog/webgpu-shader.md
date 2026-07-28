@@ -1220,7 +1220,172 @@ main.js:      setBindGroup(0, …)  entries[{ binding: 0, buffer: *UB }]
 
 草地 / 人物 / 武器共用同一份 `opaque.wgsl` 与同一条 `opaquePipeline`，靠**不同的 uniform 缓冲 + 不同的 bind group** 切换 `model` 与 `materialKind`；`setBindGroup(0, …)` 就是在换「当前 `u` 指向哪块缓冲」。
 
-### 8.5 `depthTexture` / `depthView` 与 `beginRenderPass`
+### 8.5 顶点 `Float32Array`、`VERTEX_LAYOUT` 与 `vs_main` 的传递关系
+
+§8.2 把 `positions` / `normals` / `uvs` 分开讲；§8.3 讲了 `writeBuffer` 上传；§8.4 在管线表里提到 `@location(0) position` 来自 `VERTEX_LAYOUT`。这里把三者串成一条链：**CPU 交错数组 → 显存顶点缓冲 → 管线布局声明 → draw 时 GPU 自动 fetch → `vs_main` 入参**。
+
+容易产生的误解是：JS 侧会像调函数一样给 `vs_main(position, normal, uv)` 传参。实际上 WebGPU **没有**这种调用；顶点属性是在 `drawIndexed` 时，由硬件按布局从已绑定的 `vertexBuffer` 里逐顶点读出，再喂进 shader 的 `@location(n)` 形参。
+
+#### 第一步：`interleave` 后的 `Float32Array` 长什么样
+
+`geometry.js` 约定每个顶点 **8 个 float**，交错存放（interleaved）：
+
+```text
+position(3) + normal(3) + uv(2) = 8 floats = 32 字节 / 顶点
+```
+
+`interleave` 把 §8.2 里分开的三条数组压成一条：
+
+```js
+function interleave(positions, normals, uvs) {
+  const count = positions.length / 3;
+  const data = new Float32Array(count * 8);
+  for (let i = 0; i < count; i++) {
+    const o = i * 8;
+    data[o]     = positions[i * 3];     // px
+    data[o + 1] = positions[i * 3 + 1]; // py
+    data[o + 2] = positions[i * 3 + 2]; // pz
+    data[o + 3] = normals[i * 3];       // nx
+    data[o + 4] = normals[i * 3 + 1];   // ny
+    data[o + 5] = normals[i * 3 + 2];   // nz
+    data[o + 6] = uvs[i * 2];           // u
+    data[o + 7] = uvs[i * 2 + 1];       // v
+  }
+  return data;
+}
+```
+
+以 `createGround` 的 4 个顶点为例，内存布局是：
+
+```text
+字节偏移   内容（float 下标）              含义
+────────────────────────────────────────────────────
+0–11      [0..2]   V0  position (x,y,z)
+12–23     [3..5]   V0  normal   (nx,ny,nz)
+24–31     [6..7]   V0  uv       (u,v)
+32–63     [8..15]  V1  position + normal + uv
+64–95     [16..23] V2  …
+96–127    [24..31] V3  …
+```
+
+`normal` 的值在 §8.2 已说明：地面四个顶点全是 `(0,1,0)`；人物盒子的每个面写固定法线；球体用 `(x,y,z)` 径向；圆环由参数方程算出——**都在 `geometry.js` 建模阶段写好**，不是 draw 时从 JS 再传。`createGround` 返回的 `vertices` 就是这份 `Float32Array`；`createGpuMesh` 整包 `writeBuffer` 进显存（§8.3）。
+
+#### 第二步：`VERTEX_LAYOUT` 告诉 GPU 怎么「切」这条字节流
+
+同文件末尾导出布局常量：
+
+```js
+export const VERTEX_STRIDE = 8 * 4;  // 32 字节
+export const VERTEX_LAYOUT = {
+  arrayStride: VERTEX_STRIDE,
+  attributes: [
+    { shaderLocation: 0, offset: 0,  format: "float32x3" }, // position
+    { shaderLocation: 1, offset: 12, format: "float32x3" }, // normal
+    { shaderLocation: 2, offset: 24, format: "float32x2" }, // uv
+  ],
+};
+```
+
+| 字段 | demo 取值 | 含义 |
+|---|---|---|
+| `arrayStride` | `32` | 从一个顶点到下一个顶点，在 buffer 里跳多少字节 |
+| `attributes[].shaderLocation` | `0` / `1` / `2` | 对应 WGSL 里 `@location(0/1/2)` |
+| `attributes[].offset` | `0` / `12` / `24` | 在该顶点 32 字节块内的起始偏移 |
+| `attributes[].format` | `float32x3` / `float32x2` | 每个属性读几个 32 位 float |
+
+`shaderLocation` 与 `@location` 的编号**必须一致**，否则创建管线时校验失败，或 VS 读到的字段错位。
+
+#### 第三步：管线把布局「注册」进 VS
+
+`pipelines/opaque.js` 创建管线时，把 `VERTEX_LAYOUT` 绑到 `vertex.buffers[0]`：
+
+```js
+vertex: {
+  module,
+  entryPoint: "vs_main",
+  buffers: [VERTEX_LAYOUT],
+},
+```
+
+含义：这条管线的 VS 期望 **slot 0** 的顶点缓冲按上述 stride/offset 解释。`buffers` 数组的下标与后面 `setVertexBuffer(0, …)` 的第一个参数对应。
+
+#### 第四步：WGSL `vs_main` 入参与上面一一对应
+
+`opaque.wgsl`：
+
+```wgsl
+@vertex
+fn vs_main(
+  @location(0) position: vec3f, // ← shaderLocation 0, offset 0
+  @location(1) normal: vec3f,   // ← shaderLocation 1, offset 12
+  @location(2) uv: vec2f,       // ← shaderLocation 2, offset 24
+) -> VSOut {
+  // ...
+  out.normal = normalize((u.model * vec4f(normal, 0.0)).xyz);
+  out.uv = uv;
+  return out;
+}
+```
+
+| `@location` | `VERTEX_LAYOUT` | `Float32Array` 内 | 谁写入 |
+|---|---|---|---|
+| `0` position | `shaderLocation: 0, offset: 0` | 每顶点 float `[0..2]` | `geometry.js` 的 `positions` |
+| `1` normal | `shaderLocation: 1, offset: 12` | 每顶点 float `[3..5]` | `geometry.js` 的 `normals` |
+| `2` uv | `shaderLocation: 2, offset: 24` | 每顶点 float `[6..7]` | `geometry.js` 的 `uvs` |
+
+注意：`vs_main` 里的 `normal` 是**局部空间**法线；乘 `u.model` 且 `w=0` 后变到世界空间，再 `normalize`，最后经 `@location(1) normal` 插值进 FS——这是 VS **输出**的 varying，与 VS **输入**的 `@location(1) normal` 同名不同阶段，不要混。
+
+#### 第五步：draw 时只绑 buffer，不传参
+
+`main.js` 画草地时：
+
+```js
+renderPass.setPipeline(opaquePipeline);
+renderPass.setVertexBuffer(0, groundMesh.vertexBuffer);  // slot 0 ↔ buffers[0]
+renderPass.setIndexBuffer(groundMesh.indexBuffer, "uint16");
+renderPass.setBindGroup(0, groundBG);
+renderPass.drawIndexed(groundMesh.indexCount);
+```
+
+这里没有 `normal=` 之类的 JS 参数。GPU 对 `drawIndexed` 的每个索引：
+
+1. 用索引查到「第几个顶点」；
+2. 在该顶点的 `arrayStride` 块里，按 `VERTEX_LAYOUT` 的三个 `offset` 读出 3+3+2 个 float；
+3. 分别填入 `vs_main` 的 `@location(0/1/2)`。
+
+整条链可记成：
+
+```text
+geometry.js
+  interleave → Float32Array（8 float/顶点，含 normal）
+       │
+mesh.js
+  writeBuffer → GPUBuffer（vertexBuffer）
+       │
+opaque.js
+  createRenderPipeline({ vertex: { buffers: [VERTEX_LAYOUT] } })
+       │
+opaque.wgsl
+  vs_main(@location(0) position, @location(1) normal, @location(2) uv)
+       │
+main.js
+  setVertexBuffer(0, mesh.vertexBuffer) + drawIndexed
+       │
+GPU 硬件 vertex fetch（按 stride/offset 自动读入 VS 入参）
+```
+
+#### 和 Uniform（`u`）的分工
+
+§8.4 末尾讲的 `@group(0) @binding(0) var<uniform> u` 是另一条通道：**每 draw 或每帧**由 `writeBuffer` + `setBindGroup` 注入，全网格共享同一份 `u.model` / `u.viewProj`。顶点属性则是**每个顶点各有一份** position / normal / uv，存在顶点缓冲里。
+
+| 数据 | WGSL 写法 | JS 侧怎么给 |
+|---|---|---|
+| 每顶点 position / normal / uv | `@location(n)` 形参 | `Float32Array` → `vertexBuffer` + `VERTEX_LAYOUT` + `setVertexBuffer` |
+| 每物体矩阵、光照、材质 | `@group(0) @binding(0) var<uniform> u` | `writeBuffer(uniformBuffer)` + `setBindGroup` |
+
+**一句话**：`vertices` 的 `Float32Array` 定义「每个顶点 32 字节里各字段放哪」；`VERTEX_LAYOUT` 把字节偏移翻译成 `@location` 编号；`vs_main` 只声明要哪些 `@location`；真正「传参」发生在 `drawIndexed` 时 GPU 按布局从 `setVertexBuffer` 绑定的缓冲里读——`normal` 和其他属性一样，在建网格时就算好、写进交错数组，而不是 draw 前单独传入。
+
+### 8.6 `depthTexture` / `depthView` 与 `beginRenderPass`
 
 #### 先消一个术语误会：这是「纹理 / 附件」，不是「材质」
 
