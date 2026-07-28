@@ -166,13 +166,55 @@ const colorView = context.getCurrentTexture().createView();
 - `createView()`：不分配新显存，只是创建一个 **视图描述符**——「把这张纹理当作 2D 颜色附件，从 mip0、layer0 开始，格式与创建时一致」。
 - Render Pass 的 `colorAttachments[0].view = colorView` 告诉 GPU：本 Pass 所有 FS 输出都写到这块 VRAM。
 
-`loadOp: "clear"` / `storeOp: "store"` 是 **Pass 级** 操作：
+#### `loadOp` / `storeOp`：Pass 级读写策略
 
-| 操作                    | GPU 在 Pass 开始/结束时做什么                                     |
-| ----------------------- | ----------------------------------------------------------------- |
-| `loadOp: "clear"`       | Pass 开始前，用 `clearValue` 清整 attachment（快，不必读旧内容）  |
-| `storeOp: "store"`      | Pass 结束后，结果 **保留在显存**（下一 Pass 或 `present` 还要读） |
-| 若 `storeOp: "discard"` | 某些 TBDR 架构上可以跳过写回，省带宽；画布附件不能 discard        |
+这两个字段写在 `beginRenderPass` 的描述符里，分别控制 **Pass 开始前** 和 **Pass 结束后** 附件显存怎么处理。颜色附件用 `loadOp` / `storeOp`；深度/模板附件用同名的 `depthLoadOp` / `depthStoreOp`、`stencilLoadOp` / `stencilStoreOp`（枚举类型相同）。
+
+```js
+colorAttachments: [{
+  view: colorView,
+  clearValue: { r: 0.1, g: 0.2, b: 0.3, a: 1 },
+  loadOp: "clear",
+  storeOp: "store",
+}],
+```
+
+WebGPU 规范里 **没有** `"dont-care"`（那是 Vulkan/D3D12 的概念）；合法取值只有下面四个。
+
+**`GPULoadOp`（Pass 开始前）**
+
+| 值 | GPU 做什么 | 典型场景 |
+| --- | --- | --- |
+| `"clear"` | 用 `clearValue` 把整片 attachment **刷成指定颜色** | 每帧首 Pass 清屏；不关心旧内容时优先用这个 |
+| `"load"` | 从显存 **读入** 附件已有像素，再在其上绘制 | 多 Pass 叠加（先 3D 再 UI）；半透明混合需要读旧颜色 |
+
+- 只有 `loadOp: "clear"` 时 `clearValue` 才生效；`"load"` 会忽略 clear 值。
+- 移动端 **TBDR** 架构上，`"clear"` 往往比 `"load"` 快——不必把主存里的旧内容搬进 tile 本地内存。初始内容无所谓时，规范也建议用 `"clear"` 而非 `"load"`。
+- `"load"` 要求附件 **已初始化**。若上一 Pass 用了 `"discard"` 或纹理从未写过，读到的内容未定义；规范要求驱动在真正读取前做 **惰性清零**，但不应依赖这一点做逻辑。
+
+**`GPUStoreOp`（Pass 结束后）**
+
+| 值 | GPU 做什么 | 典型场景 |
+| --- | --- | --- |
+| `"store"` | 把 Pass 渲染结果 **写回** 附件显存 | 交换链颜色（要上屏）；下一 Pass 还要读 |
+| `"discard"` | **不写回** Pass 内的渲染结果 | 中间缓冲、本 Pass 后不再读的附件 |
+
+- `"discard"` 后附件 **表现得像被清零**，但实现不必在 Pass 结束时立刻清；在 **采样、copy、下一 Pass 的 `"load"`、present 上屏** 等真正读取之前，驱动会惰性清零。
+- 对 **画布/交换链颜色附件** 用 `"discard"` 不会触发 Validation 报错，但 present 读到的可能是全黑——实践上画布 **必须** `"store"`。
+- 在 TBDR 上 `"discard"` 能跳过 tile 本地内存 → 主存的写回，省带宽；桌面 immediate-mode GPU 没有独立 tile 内存，语义仍按「像清零」处理，只是优化路径不同。
+
+**常见组合**
+
+| loadOp | storeOp | 含义 | 用途 |
+| --- | --- | --- | --- |
+| `"clear"` | `"store"` | 先清再画，结果保留 | **每帧主渲染**（demo 默认） |
+| `"load"` | `"store"` | 在旧内容上叠加，结果保留 | 后处理链、UI Pass 叠在 3D 上 |
+| `"clear"` | `"discard"` | 先清再画，结果丢弃 | 空 Pass 仅做清屏；一次性中间附件 |
+| `"load"` | `"discard"` | 读旧内容参与渲染，但不写回 | 某些后处理中间步 |
+
+**`TRANSIENT_ATTACHMENT` 纹理的强制组合**
+
+创建纹理时若带 `GPUTextureUsage.TRANSIENT_ATTACHMENT`，Render Pass 里 **必须** `loadOp: "clear"` + `storeOp: "discard"`——驱动据此知道这是临时附件，可全程留在 tile 内存里。交换链 canvas 纹理不能配 `TRANSIENT_ATTACHMENT`。
 
 ---
 
@@ -428,3 +470,92 @@ Chrome / Edge 可在 `chrome://flags` 或 Launch 参数里打开 WebGPU 验证�
 **Texture** 是 VRAM 里的二维（或更高维）数组；**View** 是绑定用的透镜；**RenderPipeline** 把 Shader、顶点布局、颜色/深度格式、混合与深度状态 **一次性封包**；**RenderPass** 声明本趟绘制写哪几块附件、清不清、保不保留。你写的 JS 变量，大多是在 **创建期** 把这些硬件参数定死；**每帧** 变的主要是 Uniform（矩阵、时间）、绑哪块 Buffer、以及 `getCurrentTexture()` 轮转哪张交换链纹理。
 
 搞清这一点，再回头看 demo 里的 `format`、`DEPTH_FORMAT`、`recreateDepth()` 和两套 Pipeline，就不是孤立的 API 调用，而是一条完整链路：**为 GPU 固定功能单元准备好格式匹配的显存，再用命令清单驱动并行着色器往这些显存里写正确的字节。**
+
+---
+
+## 10. 延伸阅读：书籍、教程与 MDN
+
+上文横跨两层知识：**WebGPU API 怎么用**，以及 **GPU 渲染管线 / 显存 / 固定功能单元在干什么**。不同资料覆盖的重点不同，可按需组合阅读。
+
+### 10.1 专门讲 WebGPU 的书与教程
+
+这些资料会直接用到 `format`、`createTexture`、`configure`、`depthStencil` 等 API，但多数不会像本文那样细讲 ROP、Early-Z、交换链轮转等硬件细节。
+
+| 资料 | 特点 | 与本文的对应关系 |
+| --- | --- | --- |
+| [The Book of WebGPU](https://electronut.in/webgpu/)（Mahesh Venkitachalam，No Starch Press，2024） | 项目驱动，从画三角形到 3D 变换、BindGroup | 讲 vertex buffer、pipeline、uniform；深度/纹理有涉及，偏实践 |
+| [The WebGPU Sourcebook](https://www.routledge.com/The-WebGPU-Sourcebook-High-Performance-Graphics-and-Machine-Learning-in-the-Browser/Scarpino/p/book/9781032726670)（Matthew Scarpino，2025） | 第 6 章 *Lighting, Textures, and Depth* 明确讲深度与纹理 | **最接近** demo 里的 `format` + `depthFormat` 组合 |
+| [WebGPU Unleashed](https://shi-yan.github.io/webgpuunleashed/)（免费在线） | 开篇讲 GPU driver 与 pipeline，强调硬件交互 | 理念上最接近「内部原理」，仍以 WebGPU 为主 |
+| [WebGPU Fundamentals](https://webgpufundamentals.org/) | 系列文章 + 示例，类似 WebGL Fundamentals | 交换链、深度缓冲、Render Pass 有专题，免费 |
+
+若目标是「把 demo 里每一行 API 对上号」，优先：**WebGPU Sourcebook** + **WebGPU Fundamentals**。
+
+### 10.2 讲 GPU 内部原理的经典教材（API 无关）
+
+ROP、深度测试、Vertex Fetch、显存布局等内容，主要来自**实时图形学 / GPU 架构**，不绑定 WebGPU，但原理完全通用。
+
+| 书 | 相关章节 | 讲什么 |
+| --- | --- | --- |
+| [Real-Time Rendering, 4th Edition](https://www.routledge.com/Real-Time-Rendering-Fourth-Edition/Akenine-Moller-Haines-Hoffman/p/book/9781138627000)（实时渲染，第 4 版） | Ch.2 图形渲染管线；Ch.3 GPU；Ch.23 图形硬件（含深度缓冲） | 深度测试、帧缓冲、管线阶段的权威参考 |
+| [Fundamentals of Computer Graphics](https://www.routledge.com/Fundamentals-of-Computer-Graphics/Shirley-Marschner/p/book/9781032329277)（Shirley 等） | 光栅化、深度缓冲、纹理 | 偏理论，适合补「深度值、Z-fighting」数学基础 |
+| [Physically Based Rendering](https://pbrt.org/)（PBRT） | 成像、采样、帧缓冲 | 偏离线渲染，但纹理/像素格式概念清晰 |
+
+补充一篇经典长文（免费）：
+
+- [A trip through the Graphics Pipeline 2011](https://fgiesen.wordpress.com/2011/07/09/a-trip-through-the-graphics-pipeline-2011-index/)（Fabian Giesen）—— Real-Time Rendering 官网也推荐。从顶点输入到 ROP 逐步拆解，与本文第 7 节「从 submit 到像素」高度同构，只是使用 D3D/OpenGL 语境。
+
+若目标是「搞懂 GPU 在干什么」，优先：**Real-Time Rendering Ch.2–3** + **Graphics Pipeline 2011**。
+
+### 10.3 MDN 文档
+
+MDN **有**完整 WebGPU API 文档，适合入门和查参数；**定位是 API 参考 + 教程，不是 GPU 硬件原理教材**。
+
+**入口与教程**
+
+- [WebGPU API 总览](https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API)——含 `configure`、`getPreferredCanvasFormat()`、`loadOp`/`storeOp`、顶点 layout 的 `format`、物理 GPU → 逻辑 Device 的分层说明；是 MDN 上最接近本文整体流程的一篇。
+- [WebGPU best practices](https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API#see_also)（总览页 See also 中链接）
+
+**与本文逐条对应的 MDN 页面**
+
+| 本文主题 | MDN 页面 |
+| --- | --- |
+| 画布 `format` | [`GPU.getPreferredCanvasFormat()`](https://developer.mozilla.org/en-US/docs/Web/API/GPU/getPreferredCanvasFormat)、[`GPUCanvasContext.configure()`](https://developer.mozilla.org/en-US/docs/Web/API/GPUCanvasContext/configure) |
+| 颜色/深度纹理 | [`GPUDevice.createTexture()`](https://developer.mozilla.org/en-US/docs/Web/API/GPUDevice/createTexture)、[`GPUTexture.format`](https://developer.mozilla.org/en-US/docs/Web/API/GPUTexture/format) |
+| 纹理视图 | [`GPUTexture.createView()`](https://developer.mozilla.org/en-US/docs/Web/API/GPUTexture/createView) |
+| 顶点 `format` | [`GPUVertexBufferLayout`](https://developer.mozilla.org/en-US/docs/Web/API/GPUVertexBufferLayout)、[`GPUVertexAttribute`](https://developer.mozilla.org/en-US/docs/Web/API/GPUVertexAttribute) |
+| Render Pass | [`GPURenderPassDescriptor`](https://developer.mozilla.org/en-US/docs/Web/API/GPURenderPassDescriptor)、[`GPURenderPassEncoder`](https://developer.mozilla.org/en-US/docs/Web/API/GPURenderPassEncoder) |
+| 深度状态 | [`GPUDepthStencilState`](https://developer.mozilla.org/en-US/docs/Web/API/GPUDepthStencilState) |
+| Fragment 输出格式 | [`GPUColorTargetState`](https://developer.mozilla.org/en-US/docs/Web/API/GPUColorTargetState) |
+| 混合 | [`GPUBlendState`](https://developer.mozilla.org/en-US/docs/Web/API/GPUBlendState) |
+
+**格式枚举的规范字典**（MDN 会指向规范，完整列表在此）：
+
+- [WebGPU 规范 — Texture Formats](https://gpuweb.github.io/gpuweb/#texture-formats)
+- [gpuweb.github.io 类型参考 — GPUTextureFormat](https://gpuweb.github.io/types/types/GPUTextureFormat.html)
+
+可在此查 `depth24plus`、`bgra8unorm` 等合法取值，但不会解释「24 bit 深度为何 4 字节对齐」等硬件细节。
+
+**MDN 通常不会展开的内容**（需结合书本 / 长文）：
+
+- 交换链双缓冲/三缓冲如何轮转
+- ROP / 深度单元 / Early-Z 的硬件分工
+- TBDR 与 `storeOp: "discard"` 的关系
+- 「创建期烘焙 format vs 每帧不再读 JS 变量」这类心智模型
+
+本文第 1～7 节补的正是这一层。
+
+**官方补充（非 MDN，建议并列使用）**
+
+- [WebGPU Explainer](https://gpuweb.github.io/gpuweb/explainer/)——设计动机、错误模型、兼容性模式
+- [WebGPU Specification](https://gpuweb.github.io/gpuweb/)——Validation 规则（如 pipeline format 必须 match attachment）
+- [WebGPU Samples](https://webgpu.github.io/webgpu-samples/)——可运行示例
+
+### 10.4 推荐阅读组合
+
+```
+想弄懂 API 参数          → MDN WebGPU API + createTexture / depthStencil 各页
+想弄懂 format 选型       → MDN getPreferredCanvasFormat + 规范 Texture Formats
+想弄懂深度/纹理在管线里  → WebGPU Sourcebook Ch.6 或 webgpufundamentals.org
+想弄懂 GPU 内部在干什么  → Real-Time Rendering Ch.2–3 + Graphics Pipeline 2011
+想对照可运行代码         → 本仓库 webgpu-shader-demo + WebGPU Samples
+```
