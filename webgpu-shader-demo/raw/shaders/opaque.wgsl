@@ -11,6 +11,9 @@ struct Uniforms {
   model: mat4x4f,    // 物体：局部 → 世界
   lightDir: vec4f,   // xyz = 光照方向（指向光源的反方向约定见 FS）
   tint: vec4f,       // rgb 基色（人物/武器可作调色；草地主要走程序化色）
+  //  kind 整形， time是浮点。 但是Shader中习惯用f32
+  // 1. 如果强制用i32类型， 则 JS 侧不能再用一个 Float32Array 连续写，要用 DataView 或分段写入
+  // 2. kind i32 与 time f32之间，必须用 f32变量填充才能对齐 。
   params: vec4f,     // x: materialKind (0 草地, 1 人物, 2 武器), y: time
 }
 
@@ -70,6 +73,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4f {
 
   var base = u.tint.rgb;
 
+  // 在 shader 里 kind 的类型是 f32
   if (kind < 0.5) {
     // —— 草地：程序化格子噪声，不采样贴图 ——
     let cell = floor(in.uv * 18.0);
