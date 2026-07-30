@@ -50,7 +50,14 @@ export async function initWebGPU(canvas) {
   return { device, context, format, get size() { return size; }, get depthView() { return depthView; } };
 }
 
-/** @returns {Uint8Array} RGBA 棋盘格 */
+/**
+ * 生成 RGBA8 棋盘格像素，供 GPUTexture 的 copyExternalImageToTexture / writeTexture 使用。
+ * @returns {Uint8Array} 长度为 size×size×4 的字节数组
+ *
+ * data 布局（行优先，每像素 4 字节）：
+ *   index = (y * size + x) * 4
+ *   [R, G, B, A] = data[i..i+3]，各通道 0–255，对应 rgba8unorm
+ */
 export function createCheckerPixels(size = 64, cells = 8) {
   const data = new Uint8Array(size * size * 4);
   const cell = size / cells;
@@ -59,11 +66,11 @@ export function createCheckerPixels(size = 64, cells = 8) {
       const cx = Math.floor(x / cell);
       const cy = Math.floor(y / cell);
       const odd = (cx + cy) & 1;
-      const i = (y * size + x) * 4;
-      data[i] = odd ? 220 : 40;
-      data[i + 1] = odd ? 80 : 160;
-      data[i + 2] = odd ? 60 : 220;
-      data[i + 3] = 255;
+      const i = (y * size + x) * 4; // 当前像素在 data 中的起始下标
+      data[i] = odd ? 220 : 40;     // R
+      data[i + 1] = odd ? 80 : 160; // G
+      data[i + 2] = odd ? 60 : 220; // B
+      data[i + 3] = 255;            // A（不透明）
     }
   }
   return data;

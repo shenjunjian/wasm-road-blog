@@ -22,5 +22,6 @@ fn vs_main(@location(0) pos: vec3f, @location(1) uv: vec2f) -> VSOut {
 
 @fragment
 fn fs_main(in: VSOut) -> @location(0) vec4f {
+  // 用顶点 UV 经 Sampler 对 2D 纹理插值采样，RGBA 直接作为片元颜色输出
   return textureSample(tex, samp, in.uv);
 }

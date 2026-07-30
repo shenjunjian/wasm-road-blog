@@ -41,6 +41,25 @@ async function main() {
     });
     device.queue.writeBuffer(ib, 0, indices);
 
+    // 纹理数据：本 demo 用 CPU 逻辑生成棋盘格；生产环境常从 PNG/JPEG 等位图加载。
+    //
+    // 加载 PNG 示例（需 await，放在 init 阶段）：
+    //   const res = await fetch("/assets/checker.png");
+    //   const bitmap = await createImageBitmap(await res.blob());
+    //   const texture = device.createTexture({
+    //     size: [bitmap.width, bitmap.height],
+    //     format: "rgba8unorm",
+    //     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    //   });
+    //   device.queue.copyExternalImageToTexture(
+    //     { source: bitmap },           // 也可传 HTMLImageElement / HTMLCanvasElement
+    //     { texture },
+    //     [bitmap.width, bitmap.height],
+    //   );
+    //   bitmap.close();
+    //
+    // 下方 writeTexture 适用于已有 Uint8Array（RGBA 交错）的场景；浏览器会先解码 PNG/JPEG，
+    // 再经 copyExternalImageToTexture 写入显存，与 writeTexture 最终都落到 GPUTexture。
     const texSize = 64;
     const pixels = createCheckerPixels(texSize);
     const texture = device.createTexture({

@@ -411,28 +411,41 @@ const renderPass = encoder.beginRenderPass({
 
 下面是把上文所有变量串起来的 **执行视角**（简化，略去驱动细节）：
 
-```
-1. queue.submit([commandBuffer])
-      ↓
-2. GPU 命令处理器读取：beginRenderPass（清 color + depth）
-      ↓
-3. setPipeline(opaquePipeline)
-   → 加载编译好的 VS/FS 机器码
-   → 配置 ROP：目标格式 bgra8unorm，无混合
-   → 配置深度单元：format depth24plus，less，写深度开
-      ↓
-4. setVertexBuffer + setBindGroup + drawIndexed
-      ↓
-5. 对每个顶点：Vertex Fetch 按 VERTEX_LAYOUT 从 VB 读 float32x3/...
-      ↓ VS
-6. 图元装配 → 光栅化 → 对每个片元插值 depth、varyings
-      ↓ FS
-7. 输出 vec4 颜色；ROP 量化成 bgra8 字节写入 colorView 对应像素
-8. 深度单元：比较 FS depth 与 depthView 像素；通过则写 color + 可能写 depth
-      ↓
-9. Pass 结束，store 保留 attachment
-      ↓
-10. present：交换链 colorView 对应纹理交给显示控制器
+```mermaid
+flowchart TB
+  submit["1. queue.submit([commandBuffer])"]
+
+  pass["2. beginRenderPass<br/>clear color + depth"]
+
+  pipeline["3. setPipeline(opaquePipeline)<br/>加载 VS/FS 机器码<br/>ROP: bgra8unorm，无混合<br/>深度: depth24plus, less, 写深度开"]
+
+  draw["4. setVertexBuffer + setBindGroup + drawIndexed"]
+
+  subgraph vertexStage["顶点阶段"]
+    fetch["5. Vertex Fetch<br/>按 VERTEX_LAYOUT 从 VB 读 float32x3/..."]
+    vs["Vertex Shader"]
+  end
+
+  subgraph rasterStage["光栅化"]
+    asm["图元装配"]
+    ras["对每个片元插值 depth、varyings"]
+  end
+
+  subgraph fragmentStage["片元 / 输出"]
+    fs["Fragment Shader"]
+    rop["7. ROP 量化 → bgra8 写入 colorView"]
+    depth["8. 深度比较 depthView<br/>通过则写 color + 可能写 depth"]
+  end
+
+  endPass["9. Pass 结束，store 保留 attachment"]
+  present["10. present：colorView → 显示控制器"]
+
+  submit --> pass --> pipeline --> draw --> fetch --> vs --> asm --> ras --> fs
+  fs --> rop
+  fs --> depth
+  rop --> endPass
+  depth --> endPass
+  endPass --> present
 ```
 
 几个容易误解的点：
