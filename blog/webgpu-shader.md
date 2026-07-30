@@ -1109,7 +1109,7 @@ demo 拆成四个文件，是为了：**一份源码对应一条管线语义**�
 |---|---|---|
 | 顶点缓冲属性 | `@location(0) position: vec3f` | `VERTEX_LAYOUT` 的 `shaderLocation` + `setVertexBuffer` |
 | 内建索引 | `@builtin(vertex_index)` / `instance_index` | 光栅化调度（粒子广告牌靠这个拼四边形） |
-| Uniform / Storage | 通过上面的 `@group`/`@binding` 全局变量 | `setBindGroup` |
+| Uniform / Storage | 通过上面的 `@group`/`@binding` 全局变量 | `setBindGroup`（传递链见 §8.5 第六步起） |
 
 **③ 顶点着色器流出（给光栅化 → 再给 FS）**
 
@@ -1149,80 +1149,11 @@ WGSL 没有「随便 `#include` 标准库头文件」的写法，数值与向量
 | 阶段内建输入 | `@builtin(position)`、`vertex_index`、`frag_depth`… | 见上两表 |
 | 用户函数 | `fn hash21(...)` | 自己写的辅助函数，VS/FS 都可调用 |
 
-#### `u` 的值是哪句话注入 / 绑定的？
+### 8.5 顶点属性与 Uniform（`u`）的传递关系
 
-`opaque.wgsl` 里这一行：
+§8.2 把 `positions` / `normals` / `uvs` 分开讲；§8.3 讲了 `writeBuffer` 上传；§8.4 在管线表里提到 `@location(0) position` 来自 `VERTEX_LAYOUT`，以及 `@group`/`@binding` 声明 uniform。这里把**顶点属性**与 **Uniform `u`** 各串成一条自上而下链。
 
-```wgsl
-@group(0) @binding(0) var<uniform> u: Uniforms;
-```
-
-只是**声明槽位**，本身不含数据。值要靠 JS 侧「建缓冲 → 写入 → 绑进 bind group → 画前挂上」四步到位。整条链都在 `main.js`。
-
-**① 建缓冲（空壳）**
-
-```js
-const groundUB = createUniformBuffer(device, UNIFORM_SIZE);
-const charUB = createUniformBuffer(device, UNIFORM_SIZE);
-const weaponUB = createUniformBuffer(device, UNIFORM_SIZE);
-```
-
-**② 把缓冲绑到 `@group(0) @binding(0)`（建立槽位 ↔ GPUBuffer 的契约）**
-
-```js
-const groundBG = device.createBindGroup({
-  layout: opaquePipeline.getBindGroupLayout(0),
-  entries: [{ binding: 0, resource: { buffer: groundUB } }],
-});
-// charBG / weaponBG 同理，各自指向 charUB / weaponUB
-```
-
-这里的 `binding: 0` 必须对上 WGSL 的 `@binding(0)`；`getBindGroupLayout(0)` 对上 `@group(0)`。
-
-**③ 每帧写入数值（真正「注入」`u` 的内容）**
-
-```js
-fillOpaqueUniform(groundUB, viewProj, identity(), 0, time);
-fillOpaqueUniform(charUB, viewProj, characterModel, 1, time);
-fillOpaqueUniform(weaponUB, viewProj, weaponModel, 2, time);
-```
-
-`fillOpaqueUniform` 内部把 `viewProj` / `model` / 光照 / tint / `params`（含 `materialKind`、time）打进 `Float32Array`，再：
-
-```js
-device.queue.writeBuffer(buffer, 0, data);
-```
-
-布局必须与 WGSL 的 `Uniforms` 结构体一致，否则矩阵/材质开关会对错位。
-
-**④ 画之前挂上 bind group（让当前 draw 能读到这份 `u`）**
-
-```js
-rpass.setBindGroup(0, groundBG);   // ← group 0 = 上面的 groundBG
-rpass.drawIndexed(groundMesh.indexCount);
-
-rpass.setBindGroup(0, charBG);
-rpass.drawIndexed(characterMesh.indexCount);
-
-rpass.setBindGroup(0, weaponBG);
-rpass.drawIndexed(weaponMesh.indexCount);
-```
-
-对应关系可以记成：
-
-```text
-opaque.wgsl:  @group(0) @binding(0) var<uniform> u
-                    ↑              ↑
-main.js:      setBindGroup(0, …)  entries[{ binding: 0, buffer: *UB }]
-                    ↑
-              writeBuffer(*UB, …) ← fillOpaqueUniform 每帧写入
-```
-
-草地 / 人物 / 武器共用同一份 `opaque.wgsl` 与同一条 `opaquePipeline`，靠**不同的 uniform 缓冲 + 不同的 bind group** 切换 `model` 与 `materialKind`；`setBindGroup(0, …)` 就是在换「当前 `u` 指向哪块缓冲」。
-
-### 8.5 顶点 `Float32Array`、`VERTEX_LAYOUT` 与 `vs_main` 的传递关系
-
-§8.2 把 `positions` / `normals` / `uvs` 分开讲；§8.3 讲了 `writeBuffer` 上传；§8.4 在管线表里提到 `@location(0) position` 来自 `VERTEX_LAYOUT`。这里把三者串成一条链：**CPU 交错数组 → 显存顶点缓冲 → 管线布局声明 → draw 时 GPU 自动 fetch → `vs_main` 入参**。
+#### 第一条链：顶点属性（每顶点一份）
 
 容易产生的误解是：JS 侧会像调函数一样给 `vs_main(position, normal, uv)` 传参。实际上 WebGPU **没有**这种调用；顶点属性是在 `drawIndexed` 时，由硬件按布局从已绑定的 `vertexBuffer` 里逐顶点读出，再喂进 shader 的 `@location(n)` 形参。
 
@@ -1347,6 +1278,8 @@ renderPass.setBindGroup(0, groundBG);
 renderPass.drawIndexed(groundMesh.indexCount);
 ```
 
+其中 `setBindGroup` 属于第二条 uniform 链（第十步）；此处先展示两条链在 draw 处的汇合。
+
 这里没有 `normal=` 之类的 JS 参数。GPU 对 `drawIndexed` 的每个索引：
 
 1. 用索引查到「第几个顶点」；
@@ -1374,16 +1307,123 @@ main.js
 GPU 硬件 vertex fetch（按 stride/offset 自动读入 VS 入参）
 ```
 
-#### 和 Uniform（`u`）的分工
+#### 第二条链：Uniform（`u`）——全网格共享，每 draw 换一份
 
-§8.4 末尾讲的 `@group(0) @binding(0) var<uniform> u` 是另一条通道：**每 draw 或每帧**由 `writeBuffer` + `setBindGroup` 注入，全网格共享同一份 `u.model` / `u.viewProj`。顶点属性则是**每个顶点各有一份** position / normal / uv，存在顶点缓冲里。
+与顶点属性「每个顶点各读一份」不同，`u` 是**整次 `drawIndexed` 共享**的常量块：同一次 draw 里所有顶点读同一份 `u.viewProj` / `u.model` / `u.params`。VS 里 `u.model * position`、FS 里 `u.lightDir` 都依赖这条链。
 
-| 数据 | WGSL 写法 | JS 侧怎么给 |
-|---|---|---|
-| 每顶点 position / normal / uv | `@location(n)` 形参 | `Float32Array` → `vertexBuffer` + `VERTEX_LAYOUT` + `setVertexBuffer` |
-| 每物体矩阵、光照、材质 | `@group(0) @binding(0) var<uniform> u` | `writeBuffer(uniformBuffer)` + `setBindGroup` |
+容易产生的误解：以为 `@group(0) @binding(0) var<uniform> u` 这一行自带数据。它只**声明槽位**；数值要靠 JS「打包 → 上传 → 绑进 bind group → draw 前 `setBindGroup`」四步到位（与 `@location` 靠 `setVertexBuffer` 不同，uniform 走 bind group）。
 
-**一句话**：`vertices` 的 `Float32Array` 定义「每个顶点 32 字节里各字段放哪」；`VERTEX_LAYOUT` 把字节偏移翻译成 `@location` 编号；`vs_main` 只声明要哪些 `@location`；真正「传参」发生在 `drawIndexed` 时 GPU 按布局从 `setVertexBuffer` 绑定的缓冲里读——`normal` 和其他属性一样，在建网格时就算好、写进交错数组，而不是 draw 前单独传入。
+#### 第六步：`fillOpaqueUniform` 把本帧矩阵打进 `Float32Array`
+
+每帧、每个物体各写一块 uniform 缓冲。启动时 `createUniformBuffer` 建好空壳；`main.js` 里布局注释与 WGSL `struct Uniforms` 必须一致：
+
+```js
+// [0..15] viewProj  [16..31] model  [32..35] lightDir  [36..39] tint  [40..43] params
+function fillOpaqueUniform(buffer, viewProj, model, kind, time) {
+  const data = new Float32Array(UNIFORM_SIZE / 4);
+  writeMat4(data, 0, viewProj);
+  writeMat4(data, 16, model);
+  // … lightDir / tint / params …
+  device.queue.writeBuffer(buffer, 0, data);
+}
+```
+
+每帧在 `frame()` 里对各物体分别调用：
+
+```js
+fillOpaqueUniform(groundUB, viewProj, identity(), 0, time);
+fillOpaqueUniform(charUB, viewProj, characterModel, 1, time);
+fillOpaqueUniform(weaponUB, viewProj, weaponModel, 2, time);
+```
+
+| WGSL 字段 | `Float32Array` 下标 | 谁写入 | 更新频率 |
+|---|---|---|---|
+| `viewProj` | `[0..15]` | 每帧 `frame()` 算相机 | 每帧，各物体相同 |
+| `model` | `[16..31]` | `characterModel` / `weaponModel` 等 | 每帧，**每物体不同** |
+| `lightDir` / `tint` / `params` | `[32..43]` | `fillOpaqueUniform` 内固定或传参 | 每帧 |
+
+布局必须与 WGSL 的 `Uniforms` 结构体一致，否则矩阵/材质开关会对错位。
+
+#### 第七步：`writeBuffer` 进显存 `uniformBuffer`
+
+与顶点链 §8.3 相同：`fillOpaqueUniform` 末尾 `writeBuffer` 把 CPU 数组拷进 `groundUB` / `charUB` / `weaponUB`。网格 VB 通常只上传一次；**UB 每帧重写**（至少 `viewProj`、`params.y` 会变）。
+
+#### 第八步：`createBindGroup` 把缓冲绑到 `@binding(0)`
+
+管线创建后，用 `getBindGroupLayout(0)` 拿到与 shader 声明一致的 layout，再建 bind group（启动时一次，不每帧改）：
+
+```js
+const groundBG = device.createBindGroup({
+  layout: opaquePipeline.getBindGroupLayout(0), // ↔ @group(0)
+  entries: [{ binding: 0, resource: { buffer: groundUB } }], // ↔ @binding(0)
+});
+// charBG → charUB，weaponBG → weaponUB
+```
+
+`binding: 0` 必须对上 WGSL 的 `@binding(0)`；这一步建立「槽位 ↔ GPUBuffer」的契约。
+
+#### 第九步：管线 + WGSL 声明 `@group` / `@binding`
+
+`opaque.js` 里 `layout: "auto"` 会从 module 推导 bind group 布局；`opaque.wgsl` 声明全局 uniform：
+
+```wgsl
+struct Uniforms { viewProj: mat4x4f, model: mat4x4f, /* … */ }
+@group(0) @binding(0) var<uniform> u: Uniforms;
+```
+
+`vs_main` / `fs_main` 不单独写 `u` 形参，直接读全局 `u`（与 `@location` 形参是两种入口）。
+
+#### 第十步：draw 前 `setBindGroup`，不传参
+
+与第五步同一段 draw 代码，顶点链与 uniform 链在此汇合：
+
+```js
+renderPass.setPipeline(opaquePipeline);
+renderPass.setVertexBuffer(0, groundMesh.vertexBuffer);
+renderPass.setIndexBuffer(groundMesh.indexBuffer, "uint16");
+renderPass.setBindGroup(0, groundBG);   // ← 当前 draw 的 u 指向 groundUB
+renderPass.drawIndexed(groundMesh.indexCount);
+
+renderPass.setBindGroup(0, charBG);     // ← 换 u，不换 pipeline / VB
+renderPass.drawIndexed(characterMesh.indexCount);
+```
+
+这里没有 `u.model=` 之类的 JS 参数。换物体 = 换 bind group。草地 / 人物 / 武器共用同一条 `opaquePipeline` 和同一份 `opaque.wgsl`，靠**不同 UB + 不同 BG** 切换 `model` 与 `materialKind`；`setBindGroup(0, …)` 就是在换「当前 `u` 指向哪块缓冲」。
+
+整条链可记成：
+
+```text
+main.js
+  fillOpaqueUniform → Float32Array（viewProj / model / params…）
+       │
+  writeBuffer → GPUBuffer（groundUB / charUB / weaponUB）
+       │
+main.js（启动时）
+  createBindGroup({ binding: 0, buffer: *UB })  ↔ @group(0) @binding(0)
+       │
+opaque.js
+  createRenderPipeline({ layout: "auto" })  // 从 shader 推导 bind group layout
+       │
+opaque.wgsl
+  @group(0) @binding(0) var<uniform> u: Uniforms
+  vs_main / fs_main 内读 u.viewProj、u.model…
+       │
+main.js
+  setBindGroup(0, groundBG) + drawIndexed
+       │
+GPU：本次 draw 全体顶点 / 片元共享同一份 u
+```
+
+#### 两条链分工（对照）
+
+| 数据 | 粒度 | WGSL 写法 | JS 侧怎么给 |
+|---|---|---|---|
+| position / normal / uv | 每顶点一份 | `@location(n)` 形参 | `interleave` → `vertexBuffer` + `VERTEX_LAYOUT` + `setVertexBuffer` |
+| 矩阵、光照、材质 | 每 draw 一份 | `@group(0) @binding(0) var<uniform> u` | `fillOpaqueUniform` + `writeBuffer` + `createBindGroup` + `setBindGroup` |
+
+**一句话（顶点）**：`vertices` 的 `Float32Array` 定义「每个顶点 32 字节里各字段放哪」；`VERTEX_LAYOUT` 把字节偏移翻译成 `@location` 编号；`vs_main` 只声明要哪些 `@location`；真正「传参」发生在 `drawIndexed` 时 GPU 按布局从 `setVertexBuffer` 绑定的缓冲里读——`normal` 和其他属性一样，在建网格时就算好、写进交错数组，而不是 draw 前单独传入。
+
+**一句话（uniform）**：`Float32Array` 按 `struct Uniforms` 打包 → `writeBuffer` 进 UB → `createBindGroup` 把 UB 挂到 `@binding(0)` → `setBindGroup` 决定当前 draw 读哪块 UB → VS/FS 全局读 `u`。
 
 ### 8.6 `depthTexture` / `depthView` 与 `beginRenderPass`
 
