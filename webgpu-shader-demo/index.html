@@ -25,13 +25,12 @@
         display: flex;
         flex-direction: column;
         align-items: center;
-        justify-content: center;
-        padding: 40px 20px;
-        gap: 28px;
+        padding: 40px 20px 60px;
+        gap: 36px;
       }
       header {
         text-align: center;
-        max-width: 560px;
+        max-width: 640px;
       }
       header h1 {
         font-size: clamp(1.4rem, 3vw, 1.85rem);
@@ -44,15 +43,32 @@
         line-height: 1.6;
         opacity: 0.8;
       }
+      header a {
+        color: #9ec5ff;
+        text-decoration: none;
+      }
+      header a:hover {
+        text-decoration: underline;
+      }
+      section {
+        width: min(960px, 100%);
+      }
+      section h2 {
+        font-size: 0.85rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        opacity: 0.55;
+        margin-bottom: 14px;
+        padding-left: 4px;
+      }
       .choices {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-        gap: 16px;
-        width: min(720px, 100%);
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 14px;
       }
       a.card {
         display: block;
-        padding: 22px 20px;
+        padding: 18px 16px;
         border-radius: 12px;
         border: 1px solid rgba(140, 180, 255, 0.22);
         background: rgba(8, 14, 28, 0.65);
@@ -79,17 +95,17 @@
         letter-spacing: 0.06em;
         text-transform: uppercase;
         opacity: 0.65;
-        margin-bottom: 10px;
-      }
-      a.card h2 {
-        font-size: 1.15rem;
-        font-weight: 600;
         margin-bottom: 8px;
       }
+      a.card h3 {
+        font-size: 1.05rem;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
       a.card p {
-        font-size: 0.88rem;
-        line-height: 1.55;
-        opacity: 0.8;
+        font-size: 0.84rem;
+        line-height: 1.5;
+        opacity: 0.78;
       }
       footer {
         font-size: 12px;
@@ -103,34 +119,99 @@
       <header>
         <h1>WebGPU Shader Demo</h1>
         <p>
-          同一画面：草地、程序化人物、武器轻摆、环线法术、头顶粒子。<br />
-          请选择实现路径进入示例。
+          配合博客
+          <a href="../blog/webgpu/README.md">WebGPU 进阶系列</a>
+          的可运行示例。下方分为<strong>综合示例</strong>与<strong>专题教程</strong>，每个文件夹互不依赖。
         </p>
       </header>
-      <nav class="choices" aria-label="示例选择">
-        <a class="card" href="/compute/">
-          <span class="tag">compute shader</span>
-          <h2>纯 WebGPU 的通用计算</h2>
-          <p>
-             仅使用 compute shader 实现一个简单的计算，并验证结果。
-          </p>
-        </a>
-        <a class="card" href="/raw/">
-          <span class="tag">Raw WebGPU</span>
-          <h2>纯 WebGPU / WGSL</h2>
-          <p>
-            无框架依赖。手写管线、Uniform、Compute Pass 与一次
-            <code>submit</code>，与博客概念一一对应。
-          </p>
-        </a>
-        <a class="card" href="/three/">
-          <span class="tag">Three.js</span>
-          <h2>Three.js + WebGPURenderer</h2>
-          <p>
-            用场景图与 TSL 材质/Compute 实现同样效果，对照框架如何封装 WebGPU。
-          </p>
-        </a>
-      </nav>
+
+      <section aria-label="综合示例">
+        <h2>综合示例</h2>
+        <nav class="choices">
+          <a class="card" href="/compute/">
+            <span class="tag">compute</span>
+            <h3>纯 WebGPU 通用计算</h3>
+            <p>Compute Shader 数组求和，CPU/GPU 结果对照验证。</p>
+          </a>
+          <a class="card" href="/raw/">
+            <span class="tag">raw</span>
+            <h3>纯 WebGPU / WGSL</h3>
+            <p>草地、人物、武器、法术环、Compute 粒子，与渲染原理博客一一对应。</p>
+          </a>
+          <a class="card" href="/three/">
+            <span class="tag">three.js</span>
+            <h3>Three.js + WebGPURenderer</h3>
+            <p>同样画面，对照框架如何封装 WebGPU 与 TSL。</p>
+          </a>
+        </nav>
+      </section>
+
+      <section aria-label="专题教程">
+        <h2>专题教程（01–12）</h2>
+        <nav class="choices">
+          <a class="card" href="/texture/">
+            <span class="tag">01 · texture</span>
+            <h3>纹理与采样</h3>
+            <p>贴图上传、Sampler、filter 与 addressMode 切换。</p>
+          </a>
+          <a class="card" href="/lighting/">
+            <span class="tag">02 · lighting</span>
+            <h3>光照模型</h3>
+            <p>Lambert 漫反射与 Blinn-Phong 高光，分步切换。</p>
+          </a>
+          <a class="card" href="/bind-group/">
+            <span class="tag">03 · bind-group</span>
+            <h3>显式 BindGroupLayout</h3>
+            <p>多物体共用 pipeline layout，不同 bind group。</p>
+          </a>
+          <a class="card" href="/postprocess/">
+            <span class="tag">04 · postprocess</span>
+            <h3>离屏渲染与后处理</h3>
+            <p>Render Target + 全屏 Pass，简易 Bloom。</p>
+          </a>
+          <a class="card" href="/shadow/">
+            <span class="tag">05 · shadow</span>
+            <h3>阴影映射</h3>
+            <p>Shadow map、bias、PCF 软阴影切换。</p>
+          </a>
+          <a class="card" href="/transparency/">
+            <span class="tag">06 · transparency</span>
+            <h3>透明排序</h3>
+            <p>错误 draw 顺序 vs 按距离排序。</p>
+          </a>
+          <a class="card" href="/instancing/">
+            <span class="tag">07 · instancing</span>
+            <h3>GPU Instancing</h3>
+            <p>万级实例 vs 多次 draw 对比。</p>
+          </a>
+          <a class="card" href="/compute-advanced/">
+            <span class="tag">08 · compute-advanced</span>
+            <h3>Compute 进阶</h3>
+            <p>Conway 生命游戏，workgroup 与 storage 读写。</p>
+          </a>
+          <a class="card" href="/skinning/">
+            <span class="tag">09 · skinning</span>
+            <h3>骨骼动画</h3>
+            <p>双骨骼手臂，VS 内矩阵混合。</p>
+          </a>
+          <a class="card" href="/lifecycle/">
+            <span class="tag">10 · lifecycle</span>
+            <h3>资源生命周期</h3>
+            <p>resize 重建 depth、destroy 与统计 HUD。</p>
+          </a>
+          <a class="card" href="/performance/">
+            <span class="tag">11 · performance</span>
+            <h3>性能与合批</h3>
+            <p>多次 draw 换 bind group vs instancing。</p>
+          </a>
+          <a class="card" href="/wgsl/">
+            <span class="tag">12 · wgsl</span>
+            <h3>WGSL 指南</h3>
+            <p>Fragment 效果切换，对照 shader 语法。</p>
+          </a>
+        </nav>
+      </section>
+
       <footer>需要支持 WebGPU 的浏览器（推荐 Chrome / Edge）</footer>
     </div>
   </body>

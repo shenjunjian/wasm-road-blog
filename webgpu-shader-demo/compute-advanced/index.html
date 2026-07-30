@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>08 · Compute 进阶</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: #0b1220; color: #e8eef8; font-family: "Segoe UI", "PingFang SC", sans-serif; }
+      #app { position: relative; width: 100%; height: 100%; }
+      canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+      #hud { position: absolute; left: 16px; top: 16px; max-width: 440px; padding: 12px 14px; background: rgba(8,14,28,.55); border: 1px solid rgba(140,180,255,.2); border-radius: 8px; font-size: 13px; line-height: 1.55; pointer-events: none; }
+      #hud a { pointer-events: auto; color: #9ec5ff; text-decoration: none; }
+      #hud kbd { background: rgba(255,255,255,.1); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+      #error { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; padding: 24px; text-align: center; background: #0b1220; z-index: 10; }
+      #error.visible { display: flex; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="gpu-canvas"></canvas>
+      <div id="hud">
+        <strong>08 · Compute 进阶</strong>
+        <p>Conway 生命游戏 · 128×128 · ping-pong storage buffer</p>
+        <p>点击切换细胞 · <kbd>R</kbd> 随机种子 · 每帧自动演化</p>
+        <p id="status"></p>
+        <p style="margin-top:8px"><a href="/">← 返回选择</a></p>
+      </div>
+      <div id="error"></div>
+    </div>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

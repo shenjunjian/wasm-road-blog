@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>10 · 资源生命周期</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: #0b1220; color: #e8eef8; font-family: "Segoe UI", "PingFang SC", sans-serif; }
+      #app { position: relative; width: 100%; height: 100%; }
+      canvas { display: block; width: 100%; height: 100%; }
+      #hud { position: absolute; left: 16px; top: 16px; max-width: 440px; padding: 12px 14px; background: rgba(8,14,28,.55); border: 1px solid rgba(140,180,255,.2); border-radius: 8px; font-size: 13px; line-height: 1.55; pointer-events: none; }
+      #hud a, #hud button { pointer-events: auto; }
+      #hud a { color: #9ec5ff; text-decoration: none; }
+      #hud kbd { background: rgba(255,255,255,.1); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+      #hud button { margin-top: 8px; padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(140,180,255,.35); background: rgba(30,50,90,.6); color: #e8eef8; font-size: 12px; cursor: pointer; }
+      #hud button:hover { background: rgba(40,70,120,.75); }
+      #error { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; padding: 24px; text-align: center; background: #0b1220; z-index: 10; }
+      #error.visible { display: flex; }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="gpu-canvas"></canvas>
+      <div id="hud">
+        <strong>10 · 资源生命周期</strong>
+        <p>旋转立方体。窗口 resize 会重建 depth texture；也可手动模拟。</p>
+        <p id="status"></p>
+        <p id="stats"></p>
+        <button type="button" id="recreate-depth">重建 Depth</button>
+        <p style="margin-top:8px"><a href="/">← 返回选择</a></p>
+      </div>
+      <div id="error"></div>
+    </div>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
