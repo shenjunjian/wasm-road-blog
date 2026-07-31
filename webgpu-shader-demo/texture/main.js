@@ -28,7 +28,7 @@ async function main() {
 
   try {
     const gpu = await initWebGPU(canvas);
-    const { device, context, format, depthView } = gpu;
+    const { device, context, format } = gpu;
 
     const { vertices, indices } = createCube();
     const vb = device.createBuffer({
@@ -179,7 +179,7 @@ async function main() {
           storeOp: "store",
         }],
         depthStencilAttachment: {
-          view: depthView,
+          view: gpu.depthView,
           depthClearValue: 1,
           depthLoadOp: "clear",
           depthStoreOp: "store",
