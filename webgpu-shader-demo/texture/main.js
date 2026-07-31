@@ -17,12 +17,14 @@ import {
 
 const FILTER_MODES = ["nearest", "linear"];
 const ADDRESS_MODES = ["repeat", "clamp-to-edge"];
+const TEXTURE_SOURCES = ["checker", "png"];
 
 async function main() {
   const canvas = document.getElementById("gpu-canvas");
   const statusEl = document.getElementById("status");
   let filterIdx = 1;
   let addressIdx = 0;
+  let textureIdx = 1;
 
   try {
     const gpu = await initWebGPU(canvas);
@@ -41,38 +43,43 @@ async function main() {
     });
     device.queue.writeBuffer(ib, 0, indices);
 
-    // 纹理数据：本 demo 用 CPU 逻辑生成棋盘格；生产环境常从 PNG/JPEG 等位图加载。
-    //
-    // 加载 PNG 示例（需 await，放在 init 阶段）：
-    //   const res = await fetch("/assets/checker.png");
-    //   const bitmap = await createImageBitmap(await res.blob());
-    //   const texture = device.createTexture({
-    //     size: [bitmap.width, bitmap.height],
-    //     format: "rgba8unorm",
-    //     usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-    //   });
-    //   device.queue.copyExternalImageToTexture(
-    //     { source: bitmap },           // 也可传 HTMLImageElement / HTMLCanvasElement
-    //     { texture },
-    //     [bitmap.width, bitmap.height],
-    //   );
-    //   bitmap.close();
-    //
-    // 下方 writeTexture 适用于已有 Uint8Array（RGBA 交错）的场景；浏览器会先解码 PNG/JPEG，
-    // 再经 copyExternalImageToTexture 写入显存，与 writeTexture 最终都落到 GPUTexture。
+    // 纹理数据：CPU 生成棋盘格，或从 PNG 位图加载；按 T 键切换。
     const texSize = 64;
     const pixels = createCheckerPixels(texSize);
-    const texture = device.createTexture({
+    const checkerTexture = device.createTexture({
       size: [texSize, texSize],
       format: "rgba8unorm",
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
     device.queue.writeTexture(
-      { texture },
+      { texture: checkerTexture },
       pixels,
       { bytesPerRow: texSize * 4 },
       [texSize, texSize],
     );
+
+    const texUrl = `/texture.png`;
+    const res = await fetch(texUrl);
+    const blob = await res.blob();
+    const bitmap = await createImageBitmap(blob);
+    const pngTexture = device.createTexture({
+      size: [bitmap.width, bitmap.height],
+      format: "rgba8unorm",
+      usage:
+        GPUTextureUsage.TEXTURE_BINDING |
+        GPUTextureUsage.COPY_DST |
+        GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    device.queue.copyExternalImageToTexture(
+      { source: bitmap },
+      { texture: pngTexture },
+      [bitmap.width, bitmap.height],
+    );
+    device.queue.submit([device.createCommandEncoder().finish()]);
+    await device.queue.onSubmittedWorkDone();
+    bitmap.close();
+
+    let currentTexture = pngTexture;
 
     const uniformBuf = device.createBuffer({
       size: 128,
@@ -115,7 +122,7 @@ async function main() {
         layout: bindGroupLayout,
         entries: [
           { binding: 0, resource: { buffer: uniformBuf } },
-          { binding: 1, resource: texture.createView() },
+          { binding: 1, resource: currentTexture.createView() },
           { binding: 2, resource: makeSampler() },
         ],
       });
@@ -124,10 +131,17 @@ async function main() {
     let bindGroup = makeBindGroup();
 
     function updateStatus() {
-      statusEl.textContent = `filter: ${FILTER_MODES[filterIdx]} · address: ${ADDRESS_MODES[addressIdx]}`;
+      statusEl.textContent =
+        `texture: ${TEXTURE_SOURCES[textureIdx]} · filter: ${FILTER_MODES[filterIdx]} · address: ${ADDRESS_MODES[addressIdx]}`;
     }
 
     window.addEventListener("keydown", (e) => {
+      if (e.key === "t" || e.key === "T") {
+        textureIdx = 1 - textureIdx;
+        currentTexture = textureIdx === 0 ? checkerTexture : pngTexture;
+        bindGroup = makeBindGroup();
+        updateStatus();
+      }
       if (e.key === "f" || e.key === "F") {
         filterIdx = 1 - filterIdx;
         bindGroup = makeBindGroup();
