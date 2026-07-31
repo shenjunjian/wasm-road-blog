@@ -31,12 +31,6 @@ async function main() {
       layout: pipeline.getBindGroupLayout(0),
       entries: [{ binding: 0, resource: { buffer: uniformBuf } }],
     });
-
-    window.addEventListener("keydown", (e) => {
-      if (e.key >= "1" && e.key <= "3") { mode = Number(e.key) - 1; statusEl.textContent = `模式: ${MODES[mode]}`; }
-    });
-    statusEl.textContent = `模式: ${MODES[mode]}`;
-
     const uniformData = new Float32Array(64);
     const eye = [0, 1.5, 4];
     let t0 = performance.now();
@@ -72,6 +66,11 @@ async function main() {
       requestAnimationFrame(frame);
     }
     requestAnimationFrame(frame);
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key >= "1" && e.key <= "3") { mode = Number(e.key) - 1; statusEl.textContent = `模式: ${MODES[mode]}`; }
+    });
+    statusEl.textContent = `模式: ${MODES[mode]}`;
   } catch (e) { showError(String(e.message || e)); }
 }
 
