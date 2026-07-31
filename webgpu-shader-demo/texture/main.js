@@ -75,8 +75,6 @@ async function main() {
       { texture: pngTexture },
       [bitmap.width, bitmap.height],
     );
-    device.queue.submit([device.createCommandEncoder().finish()]);
-    await device.queue.onSubmittedWorkDone();
     bitmap.close();
 
     let currentTexture = pngTexture;

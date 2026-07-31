@@ -10,7 +10,8 @@ async function main() {
   let mode = 2;
 
   try {
-    const { device, context, format, depthView } = await initWebGPU(canvas);
+    const gpu = await initWebGPU(canvas);
+    const { device, context, format } = gpu;
     const { vertices, indices } = createOctahedron();
     const vb = device.createBuffer({ size: vertices.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
     device.queue.writeBuffer(vb, 0, vertices);
@@ -59,7 +60,7 @@ async function main() {
       const encoder = device.createCommandEncoder();
       const pass = encoder.beginRenderPass({
         colorAttachments: [{ view: context.getCurrentTexture().createView(), clearValue: { r: 0.06, g: 0.08, b: 0.14, a: 1 }, loadOp: "clear", storeOp: "store" }],
-        depthStencilAttachment: { view: depthView, depthClearValue: 1, depthLoadOp: "clear", depthStoreOp: "store" },
+        depthStencilAttachment: { view: gpu.depthView, depthClearValue: 1, depthLoadOp: "clear", depthStoreOp: "store" },
       });
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, bindGroup);
