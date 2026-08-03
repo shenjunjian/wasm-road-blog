@@ -6,7 +6,7 @@
 
 ## 1. 定位
 
-### 流水线角色
+### 1.1 流水线角色
 
 Oxc 不是单一「编译器」，而是一组可组合的 crate：
 
@@ -23,11 +23,11 @@ Oxc 不是单一「编译器」，而是一组可组合的 crate：
 
 所有组件共享 **arena 分配**（`oxc_allocator`）：AST 节点在同一块内存中分配，零拷贝传递，无需引用计数。
 
-### 所属阵营
+### 1.2 所属阵营
 
 Oxc 是 [VoidZero](https://voidzero.dev/) 愿景的核心——由 Vue 作者 Evan You 发起，目标是用 Rust 重写整条 JS 工具链（Rolldown bundler、Vitest、Oxc 编译器套件），组件间无缝协作。
 
-### 被谁依赖
+### 1.3 被谁依赖
 
 - **Rolldown**（Vite 8 默认 bundler）：parse + transform + minify
 - **Nuxt**：解析层
@@ -38,7 +38,7 @@ Oxc 是 [VoidZero](https://voidzero.dev/) 愿景的核心——由 Vue 作者 Ev
 
 ## 2. 前端工程中的使用
 
-### npm 包一览
+### 2.1 npm 包一览
 
 | npm 包 | 用途 |
 | --- | --- |
@@ -51,20 +51,68 @@ Oxc 是 [VoidZero](https://voidzero.dev/) 愿景的核心——由 Vue 作者 Ev
 | `eslint-plugin-oxlint` | 关闭 Oxlint 已覆盖的 ESLint 规则 |
 | `oxlint-migrate` | 从 ESLint flat config 生成 `.oxlintrc.json` |
 
-### CLI 快速上手
+### 2.2 快速上手
 
-**Lint**（无需 ESLint 配置即可运行）：
+Oxc 的编译流水线（parse → transform → codegen → minify）在 Node 侧通过 N-API npm 包暴露；**Oxlint / Oxfmt** 则是开箱即用的 CLI 二进制。与 SWC 的 `@swc/cli` 不同，Oxc 目前没有统一的 `@oxc/cli`，各能力分散在独立包中。
+
+**Lint**（CLI，无需 ESLint 配置即可运行）：
 
 ```bash
 npx oxlint .
 npx oxlint --fix src/
 ```
 
-**Format**：
+**Format**（CLI）：
 
 ```bash
 npx oxfmt --write src/
 ```
+
+**Parse**（`oxc-parser`，返回 ESTree / TS-ESTree 兼容 AST）：
+
+```javascript
+import { parseSync } from "oxc-parser";
+
+const { program, module, errors } = parseSync(
+  "input.ts",
+  `export const x: number = 1;`
+);
+console.log(program.type);       // "Program"
+console.log(module.staticExports); // ESM 导出信息，无需再 walk AST
+```
+
+AST 类型定义见 `@oxc-project/types`；内置 `Visitor` 可遍历节点。若需将 AST 回写为源码，可配合 [`esrap`](https://github.com/Rich-Harris/esrap)（Oxc 官方文档示例）；带 source map 的完整 codegen 走 Rust API 或 transform / minify 内置路径。
+
+**Transform**（`oxc-transform`，TS strip、JSX、语法降级等）：
+
+```javascript
+import { transformSync } from "oxc-transform";
+
+const { code, errors } = transformSync("input.tsx", source, {
+  target: "es2020",
+  jsx: { runtime: "automatic" },
+  typescript: { declaration: false },
+});
+console.log(code);
+```
+
+**Minify**（`oxc-minify`，生产压缩 + mangling）：
+
+```javascript
+import { minifySync } from "oxc-minify";
+
+const result = minifySync("bundle.js", source, {
+  compress: { target: "esnext" },
+  mangle: { toplevel: true },
+  sourcemap: true,
+});
+console.log(result.code);
+console.log(result.map);
+```
+
+Rolldown / Vite 8 生产构建默认走这条 minify 路径，无需手动调用。
+
+**Codegen 说明**：Node 侧无独立 `oxc-codegen` 包——codegen 内嵌于 `oxc-transform`（转译输出）和 `oxc-minify`（压缩输出）中。若需在 Node 侧对裸 AST 做 codegen，目前需走 Rust crate（见 **3.3 完整示例**）或 Rolldown bundler。
 
 **Oxlint 配置**（`.oxlintrc.json`）：
 
@@ -84,13 +132,15 @@ npx oxfmt --write src/
 npx oxlint-migrate eslint.config.js > .oxlintrc.json
 ```
 
-### 框架集成
+`oxc-parser`、`oxc-transform`、`oxc-minify` 底层均为 Rust 编译出的 `.node` 原生模块（N-API），各平台预编译二进制随 npm 包分发。理解 N-API 绑定原理可参见 [`napi-rs-demo/`](../../napi-rs-demo/)。
+
+### 2.3 框架集成
 
 - **Vite 8+**：底层 Rolldown 自动消费 Oxc，无需额外配置
 - **Webpack**：`oxc-webpack-loader` / `oxc-webpack-plugin`
 - **编辑器**：VS Code / IntelliJ 插件（`oxc-vscode`、`oxc-intellij-plugin`）
 
-### 与 Rolldown / Vitest 的关系
+### 2.4 与 Rolldown / Vitest 的关系
 
 Rolldown 是 Rollup 兼容 bundler，parse/transform/minify 走 Oxc 流水线。Vite 8 将 Rolldown 作为默认生产 bundler，开发时的 HMR 仍由 Vite 自身处理，但编译核心已切换到 Rust。Vitest 也在逐步对接 VoidZero 生态，共享同一套 parser 与 resolver。
 
@@ -98,7 +148,7 @@ Rolldown 是 Rollup 兼容 bundler，parse/transform/minify 走 Oxc 流水线。
 
 ## 3. Rust 工程中直接使用
 
-### 依赖配置
+### 3.1 依赖配置
 
 推荐使用聚合 crate `oxc`，通过 feature flag 按需启用：
 
@@ -124,7 +174,7 @@ oxc = { version = "0.142", features = ["semantic", "transformer", "codegen"] }
 
 模块解析单独使用 `oxc_resolver` crate，不依赖完整 `oxc`。
 
-### 标准流水线
+### 3.2 标准流水线
 
 ```text
 Allocator → Parser → SemanticBuilder → Transformer → Codegen → Minifier
@@ -132,7 +182,7 @@ Allocator → Parser → SemanticBuilder → Transformer → Codegen → Minifie
 
 各阶段在同一 arena 中操作 AST，semantic 产出的 `Scoping` 供 transformer / linter 消费。
 
-### 完整示例：parse → transform → codegen
+### 3.3 完整示例：parse → transform → codegen
 
 ```rust
 use std::path::Path;
@@ -185,7 +235,7 @@ fn main() {
 
 运行：`cargo run`（完整源码见 [`rust-tools-demo/oxc`](../../rust-tools-demo/oxc/)）。
 
-### 仅 parse + semantic（静态分析）
+### 3.4 仅 parse + semantic（静态分析）
 
 若只需 lint 或自定义 AST 遍历，parse 后走 `SemanticBuilder` 即可，不必 codegen：
 
@@ -217,7 +267,7 @@ println!("functions: {}", counter.functions);
 
 需启用 `ast_visit` feature。
 
-### crate 拆分地图
+### 3.5 crate 拆分地图
 
 Oxc monorepo 含 30+ crate，常用独立 crate：
 
@@ -257,20 +307,20 @@ Oxc monorepo 含 30+ crate，常用独立 crate：
 
 ## 5. 选型建议
 
-### 何时选 Oxc
+### 5.1 何时选 Oxc
 
 - 新建 Rust 工具，需要 parse / transform / lint 全套能力
 - 跟随 VoidZero 生态（Vite 8 + Rolldown + Vitest）
 - 需要 **webpack 兼容的模块解析**（`oxc_resolver`）
 - 追求 **单一依赖、聚合 API**，不想管理 SWC 的 20+ crate
 
-### 何时考虑 SWC（见 [02-swc](./02-swc.md)）
+### 5.2 何时考虑 SWC（见 [02-swc](./02-swc.md)）
 
 - 项目深度绑定 **Next.js Compiler**（底层 SWC）
 - 已有 SWC 插件 / 自定义 transform pass
 - Deno 内置转译层
 
-### Oxc vs SWC 简表
+### 5.3 Oxc vs SWC 简表
 
 | 维度 | Oxc | SWC |
 | --- | --- | --- |
@@ -281,7 +331,7 @@ Oxc monorepo 含 30+ crate，常用独立 crate：
 | 模块解析 | `oxc_resolver` 独立 crate | 无对等物 |
 | 成熟度 | 快速发展，VoidZero 押注 | 久经生产，生态广 |
 
-### 常见错误
+### 5.4 常见错误
 
 | 现象 | 原因 |
 | --- | --- |

@@ -6,7 +6,7 @@
 
 ---
 
-## oxc_resolver
+## 1. oxc_resolver
 
 **定位**：Oxc 生态的 **模块路径解析器**，行为对齐 webpack / enhanced-resolve，支持 CJS、ESM、TS `paths`、package exports 等。
 
@@ -26,7 +26,7 @@ println!("{:?}", resolved.full_path());
 
 ---
 
-## Biome
+## 2. Biome
 
 **定位**：**ESLint + Prettier 合一** 的 Web 工具链，Rust 实现，单 CLI 覆盖 JS/TS/JSX/JSON/CSS/HTML/GraphQL 的 format 与 lint（512+ 规则，Prettier 兼容度约 97%）。
 
@@ -45,7 +45,7 @@ npx @biomejs/biome check --write ./src
 
 ---
 
-## Lightning CSS
+## 3. Lightning CSS
 
 **定位**：Rust 实现的 **CSS 解析、转译、压缩** 工具，替代 PostCSS + cssnano 组合，性能比传统 JS 方案快 100× 以上。Tailwind CSS v4 内置 Lightning CSS 做编译与优化。
 
@@ -73,7 +73,7 @@ const { code } = transform({
 
 ---
 
-## Rspack
+## 4. Rspack
 
 **定位**：字节跳动出品的 **Webpack 兼容 bundler**，Rust 实现，目标是无缝迁移 Webpack 配置与插件生态，性能大幅提升。
 
@@ -101,7 +101,7 @@ module.exports = {
 
 ---
 
-## Turbopack
+## 5. Turbopack
 
 **定位**：Vercel 出品的 Rust **增量 bundler**，Next.js 15+ 的默认构建引擎，基于 `turbo-tasks` 任务图架构实现细粒度缓存与 HMR。
 
@@ -113,7 +113,7 @@ module.exports = {
 
 ---
 
-## Rolldown
+## 6. Rolldown
 
 **定位**：Rollup 兼容的 Rust bundler，**Vite 8 默认生产 bundler**，由 VoidZero 维护。
 
@@ -125,7 +125,7 @@ module.exports = {
 
 ---
 
-## 速查对比
+## 7. 速查对比
 
 | 工具 | 一句话 | 前端入口 | Rust embed | 重点工具关系 |
 | --- | --- | --- | --- | --- |
@@ -138,7 +138,7 @@ module.exports = {
 
 ---
 
-## 选型速记
+## 8. 选型速记
 
 ```text
 要 webpack 兼容 bundler     → Rspack
@@ -153,7 +153,7 @@ module.exports = {
 
 ---
 
-## 延伸阅读
+## 9. 延伸阅读
 
 - 系列索引：[Rust 前端工具链系列](./README.md)
 - 可运行 demo：[`rust-tools-demo/`](../../rust-tools-demo/)

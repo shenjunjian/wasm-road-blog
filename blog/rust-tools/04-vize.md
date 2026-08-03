@@ -8,7 +8,7 @@
 
 ## 1. 定位
 
-### 流水线角色
+### 1.1 流水线角色
 
 Vize 不是通用 JS 编译器（那是 Oxc / SWC 的领域），而是 **Vue SFC 全链路** 的垂直整合：
 
@@ -23,7 +23,7 @@ Vize 不是通用 JS 编译器（那是 Oxc / SWC 的领域），而是 **Vue SF
 
 所有能力共享 **Armature（解析）→ Croquis（语义）** 两层基础，parse 一次、多处复用，避免各工具重复解析 SFC。
 
-### 静态分析栈
+### 1.2 静态分析栈
 
 ```text
 Armature          词法 + 模板/SFC 结构解析
@@ -43,11 +43,11 @@ Patina    Canon      Atelier    Maestro
 | **Canon** | 生成 virtual TypeScript，映射诊断回 Vue 源文件 | `vize check`、编辑器类型检查 |
 | **Maestro** | LSP 协议暴露诊断与编辑器功能 | `vize lsp`、VS Code、Zed |
 
-### 所属阵营
+### 1.3 所属阵营
 
 Vize 代表 **框架垂直 Rust 工具链** 路线——与 VoidZero 的通用 JS 层（Oxc）正交：Oxc 服务整条 JS 工具链，Vize 专注 Vue SFC 语义。两者可通过 `oxlint-plugin-vize` 在 Lint 层协作。
 
-### 被谁依赖 / 集成点
+### 1.4 被谁依赖 / 集成点
 
 - **Vite 项目**：`@vizejs/vite-plugin`（推荐入口）
 - **Nuxt**：`@vizejs/nuxt`（经 Nuxt Vite pipeline）
@@ -58,7 +58,7 @@ Vize 代表 **框架垂直 Rust 工具链** 路线——与 VoidZero 的通用 J
 
 ## 2. 前端工程中的使用
 
-### npm 包一览
+### 2.1 npm 包一览
 
 | npm 包 | 用途 | 支持层级 |
 | --- | --- | --- |
@@ -71,7 +71,7 @@ Vize 代表 **框架垂直 Rust 工具链** 路线——与 VoidZero 的通用 J
 | `@vizejs/nuxt` | Nuxt 模块 | 兼容性预览 |
 | `@vizejs/rspack-plugin` | Rspack 插件 | 兼容性预览 |
 
-### 快速接入：`vize init`
+### 2.2 快速接入：`vize init`
 
 ```bash
 vpx vize init                              # 交互式检测 Vite/Nuxt/PM/TS
@@ -81,7 +81,7 @@ vpx vize init --yes --lint --bundler --fmt --typecheck --editor
 
 `vize init` 自动检测 bundler、包管理器、现有 lint 命令，按需安装 `@vizejs/vite-plugin`、`oxlint-plugin-vize`、配置 `vize.config.*` 与 VS Code 扩展推荐。最小可运行示例见 [`rust-tools-demo/vize`](../../rust-tools-demo/vize/)。
 
-### Vite 集成（推荐路径）
+### 2.3 Vite 集成（推荐路径）
 
 **安装**：
 
@@ -110,7 +110,7 @@ export default defineConfig({
 
 `@vizejs/vite-plugin` 替代 `@vitejs/plugin-vue`，在 Vite transform 阶段直接调用 Rust 编译器，支持 SSR、Vapor mode、scoped CSS、JSX/TSX 等。
 
-### 共享配置：`vize.config.*`
+### 2.4 共享配置：`vize.config.*`
 
 编译、Lint、类型检查、Formatter、LSP、Musea 共用一份配置，优先级：
 
@@ -143,7 +143,7 @@ export default defineConfig(({ command, mode }) => ({
 }));
 ```
 
-### 项目 scripts
+### 2.5 项目 scripts
 
 在 `package.json` 中添加 Vize 命名 scripts（底层走 `@vizejs/native` N-API）：
 
@@ -169,7 +169,7 @@ export default defineConfig(({ command, mode }) => ({
 
 **npm scripts vs Rust CLI**：package scripts 通过 N-API 绑定调用，适合 CI 与日常开发；Rust 原生 `vize` binary 提供 `check-server`、LSP、Corsa 项目级诊断等完整功能。
 
-### Oxlint 集成
+### 2.6 Oxlint 集成
 
 已有 Oxlint 工作流的项目，可叠加 Vue 诊断：
 
@@ -188,7 +188,7 @@ export default [
 
 Patina 规则通过 Oxlint 插件桥接，与 [01-oxc](./01-oxc.md) 的 Oxlint 生态对齐。
 
-### Musea — 组件画廊
+### 2.7 Musea — 组件画廊
 
 `@vizejs/vite-plugin-musea` 提供 `.art.vue` 组件示例、design tokens、a11y 检查、VRT（视觉回归测试），替代部分 Storybook 工作流：
 
@@ -206,7 +206,7 @@ export default defineConfig({
 
 ## 3. Rust 工程中直接使用
 
-### 依赖形态
+### 3.1 依赖形态
 
 Vize monorepo 含 20+ 可发布 crate，按 [stability tier](https://vizejs.dev/stability) 分级：
 
@@ -219,7 +219,7 @@ Vize monorepo 含 20+ 可发布 crate，按 [stability tier](https://vizejs.dev/
 
 **推荐路径**：Vue 项目通过 npm 包消费；Rust 工程若需 embed SFC 编译，优先使用 `vize_atelier_sfc` crate。
 
-### crate 拆分地图
+### 3.2 crate 拆分地图
 
 ```
 基础层
@@ -247,7 +247,7 @@ Vize monorepo 含 20+ 可发布 crate，按 [stability tier](https://vizejs.dev/
 └── vize_vitrine      N-API / WASM 绑定（→ @vizejs/native、@vizejs/wasm）
 ```
 
-### Rust embed 示例：SFC 编译
+### 3.3 Rust embed 示例：SFC 编译
 
 ```rust
 use vize_atelier_sfc::{parse_sfc, compile_sfc, SfcCompilerOptions};
@@ -268,7 +268,7 @@ fn main() {
 
 运行：`cargo add vize_atelier_sfc`（版本随 Vize release 对齐，查阅 [crates.io](https://crates.io/crates/vize_atelier_sfc)）。
 
-### Rust embed 示例：Lint
+### 3.4 Rust embed 示例：Lint
 
 ```rust
 use vize_patina::{lint, Linter, LintOptions};
@@ -284,7 +284,7 @@ for d in diagnostics {
 
 Patina 规则是 SFC 上的 visitor，与 ESLint plugin-vue 规则名类似但引擎完全不同。
 
-### vize_vitrine — JS 绑定层
+### 3.5 vize_vitrine — JS 绑定层
 
 `vize_vitrine` 通过 feature flag 分别暴露 N-API 与 WASM：
 
@@ -331,14 +331,14 @@ Rust 自定义工具        → vize_atelier_sfc / vize_patina crate
 
 ## 5. 选型建议
 
-### 何时选 Vize
+### 5.1 何时选 Vize
 
 - **Vue 3 项目**，希望编译 + lint + typecheck + format 统一在 Rust 栈
 - 追求 `@vue/compiler-sfc` 级别的编译性能提升（官方 benchmark 显示 SFC 编译约 50× 加速）
 - 已在用或计划用 **Oxlint**，希望 Vue 规则同命令输出
 - 探索 **Vapor mode**、Musea 组件画廊等 Vue 新特性
 
-### 何时继续用官方 Vue 工具链
+### 5.2 何时继续用官方 Vue 工具链
 
 | 场景 | 更合适的工具 |
 | --- | --- |
@@ -348,7 +348,7 @@ Rust 自定义工具        → vize_atelier_sfc / vize_patina crate
 | 通用 bundler + PM | [03-utoo](./03-utoo.md) 或 Vite 8 + Rolldown |
 | 编辑器类型支持 | 官方 vuejs/language-tools（Volar），Vize LSP 仍实验性 |
 
-### Vize vs 官方 Vue 工具链简表
+### 5.3 Vize vs 官方 Vue 工具链简表
 
 | 维度 | Vize | 官方组合 |
 | --- | --- | --- |
@@ -360,7 +360,7 @@ Rust 自定义工具        → vize_atelier_sfc / vize_patina crate
 | Vite 集成 | `@vizejs/vite-plugin` | `@vitejs/plugin-vue` |
 | 与 Oxc 协作 | `oxlint-plugin-vize` | Oxlint 无 Vue 规则 |
 
-### 常见错误
+### 5.4 常见错误
 
 | 现象 | 原因 |
 | --- | --- |

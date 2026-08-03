@@ -6,7 +6,7 @@
 
 ## 1. 定位
 
-### 流水线角色
+### 1.1 流水线角色
 
 SWC 覆盖 Babel 生态中最核心的「parse → transform → minify → codegen」链路：
 
@@ -20,11 +20,11 @@ SWC 覆盖 Babel 生态中最核心的「parse → transform → minify → code
 
 与 Oxc 不同，SWC **不提供** Lint、Format、模块解析等周边能力——这些仍需 ESLint、Prettier、`enhanced-resolve` 或 Oxc 生态补齐。
 
-### 所属阵营
+### 1.2 所属阵营
 
 SWC 是 **Vercel / Next.js 生态** 的编译核心。Next.js 12 起默认启用 SWC 替代 Babel 做单文件转译，Next.js 13 起生产压缩也切换到 SWC minifier。Deno 内置 SWC 做 TypeScript 转译，无需额外配置。
 
-### 被谁依赖
+### 1.3 被谁依赖
 
 - **Next.js**：Compiler、minify、部分内置 transform（styled-components、Relay 等）
 - **Deno**：内置 TS → JS 转译
@@ -36,7 +36,7 @@ SWC 是 **Vercel / Next.js 生态** 的编译核心。Next.js 12 起默认启用
 
 ## 2. 前端工程中的使用
 
-### npm 包一览
+### 2.1 npm 包一览
 
 | npm 包 | 用途 |
 | --- | --- |
@@ -47,7 +47,7 @@ SWC 是 **Vercel / Next.js 生态** 的编译核心。Next.js 12 起默认启用
 | `swc-loader` | Webpack loader |
 | `@swc/wasm` | 浏览器 Wasm 版（功能有限，非主路径） |
 
-### @swc/core 快速上手
+### 2.2 @swc/core 快速上手
 
 **Transform**（最常用）：
 
@@ -99,7 +99,7 @@ console.log(ast.type); // "Module"
 
 `@swc/core` 底层是 Rust 编译出的 `.node` 原生模块（N-API），各平台预编译二进制随 npm 包分发。理解 N-API 绑定原理可参见 [`napi-rs-demo/`](../../napi-rs-demo/)。
 
-### Next.js Compiler
+### 2.3 Next.js Compiler
 
 Next.js 项目 **无需手动调用** `@swc/core`——框架在构建时自动使用 SWC：
 
@@ -124,7 +124,7 @@ module.exports = {
 };
 ```
 
-### 其它集成场景
+### 2.4 其它集成场景
 
 **Webpack**：
 
@@ -160,7 +160,7 @@ module.exports = {
 
 ## 3. Rust 工程中直接使用
 
-### 依赖配置
+### 3.1 依赖配置
 
 SWC 没有类似 Oxc 的聚合 crate，需按需引入多个子 crate：
 
@@ -178,7 +178,7 @@ swc_ecma_transforms_typescript = "24"
 
 也可使用 `swc_core` crate（SWC 内部聚合层），但 API 稳定性不如 `@swc/core` 的 JS 接口。
 
-### GLOBALS 闭包——最重要的约束
+### 3.2 GLOBALS 闭包——最重要的约束
 
 SWC 用 **span hygiene** 管理标识符作用域与重命名。所有 parse、transform、codegen 操作 **必须在 `GLOBALS.set` 闭包内执行**，否则 panic：
 
@@ -193,7 +193,7 @@ GLOBALS.set(&globals, || {
 
 这是 SWC 与 Oxc 最大的 embed 体验差异——Oxc 用 arena 生命周期管理，SWC 用线程局部 GLOBALS。
 
-### 标准流水线
+### 3.3 标准流水线
 
 ```text
 SourceMap + Lexer → Parser → resolver → transform passes → hygiene → fixer → Codegen
@@ -206,7 +206,7 @@ Transform 阶段通常按以下顺序：
 3. **`hygiene`** — 解决同名标识符冲突
 4. **`fixer`** — 补全必要括号（可选但推荐）
 
-### 完整示例：TypeScript → JavaScript
+### 3.4 完整示例：TypeScript → JavaScript
 
 以下示例改编自 SWC 官方 `ts_to_js` example：
 
@@ -259,7 +259,7 @@ fn main() {
 
 运行：`cargo run`（完整源码见 [`rust-tools-demo/swc`](../../rust-tools-demo/swc/)）。
 
-### 自定义 Transform Pass
+### 3.5 自定义 Transform Pass
 
 SWC transform 基于 **Fold** / **VisitMut** trait，与 Rust 编译器 pass 类似：
 
@@ -282,7 +282,7 @@ program.visit_mut_with(&mut ConsolePrefix);
 
 复杂 pass 需在 `resolver` 之后、`hygiene` 之前插入，并配合 `Ident::new_private` 创建私有标识符。
 
-### crate 拆分地图
+### 3.6 crate 拆分地图
 
 SWC monorepo 含 50+ crate，常用模块：
 
@@ -337,21 +337,21 @@ Node 侧调用 `@swc/core` 即可，无需关心 crate 拆分。Rust 侧 embed �
 
 ## 5. 选型建议
 
-### 何时选 SWC
+### 5.1 何时选 SWC
 
 - 项目基于 **Next.js**，Compiler 已内置，无需额外选型
 - 需要 **Deno 兼容**或 `@swc-node/register` 做 Node TS 即时编译
 - 已有 **SWC WASM 插件**或 `@swc/jest` 等生态投资
 - 写 Rust bundler / 工具链，需与 Next.js 共用同一套 transform 逻辑
 
-### 何时考虑 Oxc（见 [01-oxc](./01-oxc.md)）
+### 5.2 何时考虑 Oxc（见 [01-oxc](./01-oxc.md)）
 
 - 新建 Rust 工具，希望 **单一 crate + feature flags**
 - 需要 **Lint / Format / 模块解析**一体化
 - 跟随 **VoidZero 生态**（Vite 8 + Rolldown + Vitest）
 - 不想管理 GLOBALS 闭包与 10+ crate 版本对齐
 
-### SWC vs Oxc 简表
+### 5.3 SWC vs Oxc 简表
 
 | 维度 | SWC | Oxc |
 | --- | --- | --- |
@@ -365,7 +365,7 @@ Node 侧调用 `@swc/core` 即可，无需关心 crate 拆分。Rust 侧 embed �
 
 两者在 parse / transform / minify 能力上高度重叠，选型关键看 **生态绑定**而非性能差距。
 
-### 常见错误
+### 5.4 常见错误
 
 | 现象 | 原因 |
 | --- | --- |

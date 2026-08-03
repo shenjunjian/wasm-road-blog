@@ -76,11 +76,11 @@ Rust 前端工具暴露给 JavaScript 生态，常见三种路径：
 
 | 工具 | 前端入口 | Rust embed | 详见 |
 | --- | --- | --- | --- |
-| `oxc_resolver` | npm `oxc-resolver` | ✅ 独立 crate | [05-others](./05-others.md#oxc_resolver) |
-| Biome | `@biomejs/biome` CLI | ✅ 内部 crate，无稳定公开 API | [05-others](./05-others.md#biome) |
-| Lightning CSS | `lightningcss` npm | ✅ `lightningcss` crate | [05-others](./05-others.md#lightning-css) |
-| Rspack | `@rspack/core` | ⚠️ N-API 为主，custom binding 有限 | [05-others](./05-others.md#rspack) |
-| Turbopack | Next.js 内置 | ❌ 无独立 crate API | [05-others](./05-others.md#turbopack) |
+| `oxc_resolver` | npm `oxc-resolver` | ✅ 独立 crate | [05-others](./05-others.md#1-oxc_resolver) |
+| Biome | `@biomejs/biome` CLI | ✅ 内部 crate，无稳定公开 API | [05-others](./05-others.md#2-biome) |
+| Lightning CSS | `lightningcss` npm | ✅ `lightningcss` crate | [05-others](./05-others.md#3-lightning-css) |
+| Rspack | `@rspack/core` | ⚠️ N-API 为主，custom binding 有限 | [05-others](./05-others.md#4-rspack) |
+| Turbopack | Next.js 内置 | ❌ 无独立 crate API | [05-others](./05-others.md#5-turbopack) |
 | Rolldown | Vite 8 bundler | ⚠️ 底层消费 Oxc，非独立 embed 入口 | [01-oxc](./01-oxc.md) |
 
 ## 专题目录

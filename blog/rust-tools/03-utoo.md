@@ -8,7 +8,7 @@
 
 ## 1. 定位
 
-### 流水线角色
+### 1.1 流水线角色
 
 Utoo 不是单一编译器，而是一套 **PM → Bundler → Browser Dev** 的垂直整合：
 
@@ -21,11 +21,11 @@ Utoo 不是单一编译器，而是一套 **PM → Bundler → Browser Dev** 的
 
 与 Oxc / SWC 不同，Utoo **不自研 parser/transform**——转译走 Turbopack 内嵌的 SWC，bundler 增量引擎走 Turbopack 的 `turbo-tasks` 架构。
 
-### 所属阵营
+### 1.2 所属阵营
 
 Utoo 代表 **蚂蚁 / 国内大厂自研工具链** 路线：在 Turbopack 开源核心之上构建通用 bundler（utoopack），而非绑定 Next.js 或 VoidZero 生态。Mako 的用户可平滑迁移到 `@utoo/pack`。
 
-### 与 Turbopack 的关系
+### 1.3 与 Turbopack 的关系
 
 ```text
 @utoo/pack (Node API + CLI)
@@ -37,7 +37,7 @@ turbo-tasks / turbo-tasks-fs / turbopack-core ...
 SWC (@swc/core 同级 Rust crate)
 ```
 
-utoopack **不是 Turbopack fork**，而是依赖其 crate 并在之上叠加通用配置、Webpack 兼容模式、独立 CLI。Turbopack 作为 Next.js 内置 bundler 无独立 crate API（见 [05-others](./05-others.md#turbopack)），Utoo 是目前少数将 Turbopack 引擎 **脱离 Next.js 暴露给通用前端项目** 的路径之一。
+utoopack **不是 Turbopack fork**，而是依赖其 crate 并在之上叠加通用配置、Webpack 兼容模式、独立 CLI。Turbopack 作为 Next.js 内置 bundler 无独立 crate API（见 [05-others](./05-others.md#5-turbopack)），Utoo 是目前少数将 Turbopack 引擎 **脱离 Next.js 暴露给通用前端项目** 的路径之一。
 
 ---
 
@@ -216,7 +216,7 @@ flowchart TB
 
 ## 3. Rust 工程中直接使用
 
-### 依赖形态
+### 3.1 依赖形态
 
 Utoo monorepo 的 Rust 部分分两类：
 
@@ -228,7 +228,7 @@ Utoo monorepo 的 Rust 部分分两类：
 
 **结论**：Utoo 的 Rust 层 **不适合像 Oxc 那样轻量 embed**。PM 可 `cargo install utoo-pm` 获得 CLI；bundler 应通过 `@utoo/pack` N-API 或 `@utoo/web` WASM 消费。
 
-### PM 源码结构
+### 3.2 PM 源码结构
 
 ```
 crates/
@@ -243,7 +243,7 @@ crates/
 
 `cargo install utoo-pm` 安装的是 PM CLI，不是 library。若要在 Rust 工程中调用 bundler 逻辑，目前没有官方稳定路径——应使用 Node 侧 `@utoo/pack` API。
 
-### WASM 编译配置
+### 3.3 WASM 编译配置
 
 `@utoo/web` 的 Rust 部分编译目标为 `wasm32-unknown-unknown`，使用专用 profile：
 
@@ -291,14 +291,14 @@ Rust 工具 embed parser  → 用 Oxc / SWC，而非 Utoo
 
 ## 5. 选型建议
 
-### 何时选 Utoo
+### 5.1 何时选 Utoo
 
 - 需要 **统一 PM + Bundler**，且偏好 Rust 性能（蚂蚁内部 / Mako 迁移）
 - 希望使用 **Turbopack 引擎**但不想绑定 Next.js
 - 构建 **浏览器内 IDE / Playground / 在线 dev 环境**（`@utoo/web` 几乎无竞品）
 - Webpack 项目需要 **渐进式迁移**（`--webpack` 兼容模式）
 
-### 何时考虑其它工具
+### 5.2 何时考虑其它工具
 
 | 场景 | 更合适的工具 |
 | --- | --- |
@@ -308,7 +308,7 @@ Rust 工具 embed parser  → 用 Oxc / SWC，而非 Utoo
 | Rust embed parse/transform | Oxc 或 SWC crate，非 Utoo |
 | 仅需 Lint + Format | Biome 或 Oxlint（见 [05-others](./05-others.md)） |
 
-### Utoo vs 其它 bundler 简表
+### 5.3 Utoo vs 其它 bundler 简表
 
 | 维度 | Utoo (`@utoo/pack`) | Vite + Rolldown | Next.js Turbopack |
 | --- | --- | --- | --- |
@@ -318,7 +318,7 @@ Rust 工具 embed parser  → 用 Oxc / SWC，而非 Utoo
 | Webpack 兼容 | ✅ `--webpack` 模式 | ⚠️ 插件生态不同 | ❌ |
 | PM 一体化 | ✅ `ut` | ❌（需 pnpm/npm） | ❌ |
 
-### 常见错误
+### 5.4 常见错误
 
 | 现象 | 原因 |
 | --- | --- |
