@@ -1,0 +1,12 @@
+[package]
+name = "swc-demo"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+swc_common = "14"
+swc_ecma_codegen = "16"
+swc_ecma_parser = "21"
+swc_ecma_transforms_base = "23"
+swc_ecma_transforms_typescript = "24"

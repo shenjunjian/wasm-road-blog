@@ -1,0 +1,15 @@
+{
+  "name": "utoo-pack-demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Utoo @utoo/pack 最小 demo，对应 blog/rust-tools/03-utoo.md",
+  "scripts": {
+    "dev": "up dev",
+    "build": "up build"
+  },
+  "devDependencies": {
+    "@utoo/pack": "^1.4.6",
+    "@utoo/pack-cli": "^1.4.6",
+    "typescript": "^5.7.0"
+  }
+}
