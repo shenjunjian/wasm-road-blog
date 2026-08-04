@@ -7,7 +7,7 @@ description: "从 WASI 定位与版本演进讲起，P1 简略带过；重点讲
 
 # WASI 基础：从 P1 到 P3 的系统接口与 Component 开发
 
-> 一篇自洽的 WASI 专文：P1 简略带过，P2 作为 Component/WIT 主干深入讲解，P3 对照 P2 讲 async 差异；配套可运行 demo 见 [wasi-road-demo/](../wasi-road-demo/)。
+> 一篇自洽的 WASI 专文：P1 简略带过，P2 作为 Component/WIT 主干深入讲解，P3 对照 P2 讲 async 差异；配套可运行 demo 见 [wasi-road-demo/](https://github.com/shenjunjian/wasm-road-blog/tree/main/wasi-road-demo/)。
 
 ---
 
@@ -116,7 +116,7 @@ flowchart TB
 | 第 9–10 章            | 选型、路线图                       | —                                       |
 
 
-所有可运行 demo 源码与脚本见 [wasi-road-demo/](../wasi-road-demo/)。
+所有可运行 demo 源码与脚本见 [wasi-road-demo/](https://github.com/shenjunjian/wasm-road-blog/tree/main/wasi-road-demo/)。
 
 ---
 
@@ -334,7 +334,7 @@ bash scripts/run-p1.sh -- hello
 
 ### 2.4 Demo
 
-配套最小示例：[wasi-road-demo/crates/wasi-p1-cli-demo/](../wasi-road-demo/crates/wasi-p1-cli-demo/)
+配套最小示例：[wasi-road-demo/crates/wasi-p1-cli-demo/](https://github.com/shenjunjian/wasm-road-blog/tree/main/wasi-road-demo/crates/wasi-p1-cli-demo/)
 
 与 P2 demo 功能相同（读 `input.txt`、写 `output.txt`、打印 args/env），便于**同功能、不同产物形态**对照：P1 产出 Core Module，P2 产出 Component。
 
@@ -1073,7 +1073,7 @@ sequenceDiagram
 
 ## 第 5 章：P2 开发方法（Rust + 完整 demo）
 
-**配套 demo**：[wasi-road-demo/crates/wasi-p2-cli-demo/](../wasi-road-demo/crates/wasi-p2-cli-demo/)
+**配套 demo**：[wasi-road-demo/crates/wasi-p2-cli-demo/](https://github.com/shenjunjian/wasm-road-blog/tree/main/wasi-road-demo/crates/wasi-p2-cli-demo/)
 
 Demo 功能：读 preopen 目录下 `data/input.txt` → 写 `data/output.txt` → 打印命令行参数与环境变量。与 P1 demo 逻辑相同，但产物为 **P2 Component**。
 
@@ -1218,7 +1218,7 @@ wasm-tools component new app.wasm \
 
 ## 第 6 章：WASI P3 特性与 API 差异
 
-> **Demo 说明**：`wasm32-wasip3` 目前仅在 Rust **nightly Tier 3** 提供，stable 不可用。本文 **不提供** P3 可运行 Rust demo；以下以官方规范与命令为准。待 target 进入 stable 后，将在 [wasi-road-demo/](../wasi-road-demo/) 补全 `wasi-p3-cli-demo`。
+> **Demo 说明**：`wasm32-wasip3` 目前仅在 Rust **nightly Tier 3** 提供，stable 不可用。本文 **不提供** P3 可运行 Rust demo；以下以官方规范与命令为准。待 target 进入 stable 后，将在 [wasi-road-demo/](https://github.com/shenjunjian/wasm-road-blog/tree/main/wasi-road-demo/) 补全 `wasi-p3-cli-demo`。
 
 
 
@@ -1462,7 +1462,7 @@ jco 会将 WIT 类型映射为 JS 对象，`stream`/`pollable` 在 P2 路径映�
 
 **P3 路径**：使用 `@bytecodealliance/preview3-shim`，streams 已可用，futures 映射为 Promise 的能力仍在完善。本文 `hosts/jco-p3-host` 暂缓，请参阅 jco 官方 P3 文档。
 
-项目占位目录：[wasi-road-demo/hosts/jco-p2-host/](../wasi-road-demo/hosts/jco-p2-host/)
+项目占位目录：[wasi-road-demo/hosts/jco-p2-host/](https://github.com/shenjunjian/wasm-road-blog/tree/main/wasi-road-demo/hosts/jco-p2-host/)
 
 ### 8.4 Component 组合与分发
 
@@ -1610,7 +1610,7 @@ WASI 仍在快速演进，[wasi.dev/releases](https://wasi.dev/releases) 列出�
 | Spin 文档            | [spinframework.dev](https://spinframework.dev/)                                          |
 | jco 仓库             | [github.com/bytecodealliance/jco](https://github.com/bytecodealliance/jco)               |
 | WASI 0.3 发布公告      | [bytecodealliance.org/articles/WASI-0.3](https://bytecodealliance.org/articles/WASI-0.3) |
-| 本文配套 demo          | [wasi-road-demo/](../wasi-road-demo/)                                                    |
+| 本文配套 demo          | [wasi-road-demo/](https://github.com/shenjunjian/wasm-road-blog/tree/main/wasi-road-demo/)                                                    |
 | HTTP Component 示例  | [sample-wasi-http-rust](https://github.com/bytecodealliance/sample-wasi-http-rust)        |
 | 姊妹篇：Wasm 基础        | [wasm-fundamentals.md](./wasm-fundamentals.md)                                           |
 
@@ -1774,13 +1774,13 @@ npx jco transpile app.wasm -o ./generated
 ### P3 相关
 
 - `wasm32-wasip3` 仅在 **nightly** toolchain 可用，stable rustup 无法安装
-- 本文 [wasi-road-demo](../wasi-road-demo/) **不提供** P3 可运行 demo；P3 命令以官方文档为准
+- 本文 [wasi-road-demo](https://github.com/shenjunjian/wasm-road-blog/tree/main/wasi-road-demo/) **不提供** P3 可运行 demo；P3 命令以官方文档为准
 
 ---
 
 ## 附录 D：demo 索引
 
-完整工程：[wasi-road-demo/](../wasi-road-demo/)
+完整工程：[wasi-road-demo/](https://github.com/shenjunjian/wasm-road-blog/tree/main/wasi-road-demo/)
 
 ```
 wasi-road-demo/

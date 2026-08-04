@@ -1,2 +1,5 @@
 rust-monorepo-demos/target
 rust-tools-demo/**/target
+blog-vp-site/node_modules
+blog-vp-site/.vitepress/cache 
+blog-vp-site/.vitepress/dist
