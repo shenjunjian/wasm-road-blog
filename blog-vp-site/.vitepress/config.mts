@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module'
 import { defineConfig } from 'vitepress'
 import { withMermaid } from 'vitepress-plugin-mermaid'
-import { generateNav, generateSidebar } from './sidebar.mts'
+import { nav, sidebar } from './sidebar.mts'
 
 const require = createRequire(import.meta.url)
 const dayjsEsm = require.resolve('dayjs/esm/index.js')
@@ -45,8 +45,8 @@ export default withMermaid({
 
     themeConfig: {
       logo: undefined,
-      nav: generateNav(),
-      sidebar: generateSidebar(),
+      nav,
+      sidebar,
 
       search: {
         provider: 'local',
