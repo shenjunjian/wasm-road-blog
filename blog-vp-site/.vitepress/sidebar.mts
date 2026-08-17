@@ -16,6 +16,7 @@ export const sidebar: DefaultTheme.Sidebar = {
       text: "WebGPU 进阶",
       collapsed: false,
       items: [
+        { text: "WebGPU 架构[✅]", link: "/webgpu/deep" },
         { text: "系列导读", link: "/webgpu/" },
         { text: "01 · 纹理与采样", link: "/webgpu/01-texture-sampling" },
         { text: "02 · 光照模型", link: "/webgpu/02-lighting" },

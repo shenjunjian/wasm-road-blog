@@ -253,11 +253,16 @@ device.queue.writeTexture({ texture }, pixels, { bytesPerRow }, [w, h]);
 
 shader 里写 `@group(0) @binding(0)`，就是声明"我要从第 0 组的 0 号槽取资源"。BindGroupLayout 是这句话的类型化描述，BindGroup 是这句话的实体填充。
 
-### 4.2 layout: "auto" 与 getBindGroupLayout
+### 4.2 创建BindGroupLayout
+
+### 4.2.1 auto模式创建
 
 ```js
 // pipelines/opaque.js —— 创建管线时
-layout: "auto",
+ device.createRenderPipeline({
+    layout: "auto",
+    // ......
+ })
 
 // main.js —— 创建 BindGroup 时
 const groundBG = device.createBindGroup({
@@ -269,6 +274,45 @@ const groundBG = device.createBindGroup({
 `layout: "auto"` 让浏览器**从 WGSL 源码自动推断** shader 需要哪些组、哪些槽、什么类型，生成管线自带的 BindGroupLayout。之后 `pipeline.getBindGroupLayout(0)` 把这个"组 0 的规格"取回来，创建 BindGroup 时填进对应的具体 buffer。
 
 这意味着**两端自动对齐**：shader 里写什么类型，BindGroupLayout 就是什么类型；类型不匹配时创建管线或绑定就会报错，而不是运行到一半才花屏。
+
+### 4.2.2 手动创建 BindGroupLayout 
+
+`layout: "auto"` 背后做的事，也可以自己写出来。opaque 管线对应的 shader 只有一条声明：
+
+```wgsl
+@group(0) @binding(0) var<uniform> u: Uniforms;
+```
+
+`vs_main` 和 `fs_main` 都会读 `u`，所以 visibility 要覆盖顶点与片元两个阶段；槽位类型是 uniform buffer：
+
+```js
+const opaqueBindGroupLayout = device.createBindGroupLayout({
+  entries: [{
+    binding: 0,
+    visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+    buffer: { type: "uniform" },
+  }],
+});
+const opaquePipelineLayout = device.createPipelineLayout({
+  bindGroupLayouts: [opaqueBindGroupLayout], // 下标 0 ↔ shader 的 @group(0)
+});
+```
+
+创建管线时把 `layout: "auto"` 换成 `layout: opaquePipelineLayout`；创建 BindGroup 时也不再调用 `getBindGroupLayout(0)`，而是直接引用上面的 layout：
+
+```js
+const opaquePipeline = device.createRenderPipeline({
+  layout: opaquePipelineLayout, // 等价于 layout: "auto"
+  /* vertex / fragment / ... 不变 */
+});
+
+const groundBG = device.createBindGroup({
+  layout: opaqueBindGroupLayout, // 等价于 opaquePipeline.getBindGroupLayout(0)
+  entries: [{ binding: 0, resource: { buffer: groundUB } }],
+});
+```
+
+效果与 auto 完全一致：同一套 binding 契约，同一组 buffer 填充方式。差别在于 layout 在 JS 里**可见、可复用**——多条管线可以共用 `opaqueBindGroupLayout`，不必每条都 `getBindGroupLayout` 一遍。更系统的分组策略见 [03 · 显式 BindGroupLayout](./03-bind-group-layout.md)。
 
 ### 4.3 entries：一个组里可以有多个槽
 
@@ -295,7 +339,7 @@ entries: [
 ### 5.1 createRenderPipeline 各属性
 
 ```js
-const module = device.createShaderModule({ code: opaqueCode }); // 编译 WGSL
+const module = device.createShaderModule({ code: opaqueCode }); // 校验 WGSL，真正编译在 createRenderPipeline
 
 device.createRenderPipeline({
   layout: "auto",                        // 自动生成 BindGroupLayout（第四章）
@@ -329,7 +373,7 @@ device.createRenderPipeline({
 - **`depthStencil`**：深度 / 模板附件的格式与比较规则（第七章展开）。
 - **`layout`**：把第四章的 BindGroupLayout 体系接进管线。
 
-`createShaderModule` 只负责编译；同一个模块里可以同时有 `vs_main` 和 `fs_main`，由 `vertex.entryPoint` / `fragment.entryPoint` 分别点名。
+`createShaderModule` 只负责创建模块并校验 WGSL（语法、类型等），这一步通常很快。真正把 WGSL 译成 GPU 机器码、并把 VS/FS 与 layout / 顶点格式 / 颜色附件焊在一起，发生在 `createRenderPipeline`。同一个模块里可以同时有 `vs_main` 和 `fs_main`，由 `vertex.entryPoint` / `fragment.entryPoint` 分别点名。
 
 ### 5.2 VERTEX_LAYOUT：顶点字节流 ↔ shader 入参
 
