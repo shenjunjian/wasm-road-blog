@@ -41,7 +41,6 @@ flowchart LR
 
 ## 二、初始化设备
 
-
 ### 2.1 三层对象：GPU → Adapter → Device
 
 ```js
@@ -62,7 +61,6 @@ context.configure({ device, format, alphaMode: "opaque" });
 
 `context.configure()` 让浏览器创建一条与画布尺寸匹配的**交换链**，即向底层图形 API（D3D12 / Vulkan / Metal）申请 2～3 张 与 canvas 同尺寸的 颜色纹理，放在显存里。 `present` 时，OS 合成器会读这张纹理显示到屏幕。
 
-
 ### 2.2 监听画面 resize
 
 ```js
@@ -80,7 +78,7 @@ function recreateDepth() {
   if (depthTexture) depthTexture.destroy();
   depthTexture = device.createTexture({
     size: [canvas.width, canvas.height],
-    format: DEPTH_FORMAT,          // "depth24plus"
+    format: DEPTH_FORMAT, // "depth24plus"
     usage: GPUTextureUsage.RENDER_ATTACHMENT,
   });
   depthView = depthTexture.createView();
@@ -141,11 +139,11 @@ device.queue.writeBuffer(indexBuffer, 0, mesh.indices);
 #### VERTEX_LAYOUT：告诉 GPU 怎么切字节
 
 ```js
-export const VERTEX_STRIDE = 8 * 4;        // 32 字节：一个顶点占 8 个 float
+export const VERTEX_STRIDE = 8 * 4; // 32 字节：一个顶点占 8 个 float
 export const VERTEX_LAYOUT = {
-  arrayStride: VERTEX_STRIDE,              // 相邻顶点起点相距 32 字节
+  arrayStride: VERTEX_STRIDE, // 相邻顶点起点相距 32 字节
   attributes: [
-    { shaderLocation: 0, offset: 0,  format: "float32x3" }, // 位置，12B
+    { shaderLocation: 0, offset: 0, format: "float32x3" }, // 位置，12B
     { shaderLocation: 1, offset: 12, format: "float32x3" }, // 法线，12B
     { shaderLocation: 2, offset: 24, format: "float32x2" }, // UV，8B
   ],
@@ -171,6 +169,7 @@ fn vs_main(
 `shaderLocation` 不是字节偏移，而是一个**编号约定**：编号 0 表示"管线的第 0 路顶点输入"，具体取哪几个字节由同一条 attribute 的 `offset + format` 决定。创建管线时（`vertex.buffers: [VERTEX_LAYOUT]`）浏览器会校验两边是否对得上——shader 声明了 `@location(n)` 但缓冲里没提供，或者 `float32x3` 与 `vec3f` 类型不匹配，都会在**创建管线时报错**，而不是画出一团乱。绘制时 `setVertexBuffer(0, mesh.vertexBuffer)` 的 `0` 对应 `buffers: [VERTEX_LAYOUT]` 数组下标（第 0 个顶点缓冲槽）。
 
 > 容易混淆的点：`@location` 有两套，别搞混。
+>
 > - 顶点着色器**入参**的 `@location`：对接顶点缓冲的 `shaderLocation`，就是上面这套。
 > - 顶点着色器**输出**（`VSOut`）里的 `@location(0/1/2)`：是传给片元着色器做插值的通道（worldPos / normal / uv），与顶点缓冲无关。demo 里两套都从 0 开始编号，只是巧合。
 
@@ -180,16 +179,16 @@ fn vs_main(
 
 **`usage`**：位标志，声明这块缓冲的用途，驱动据此决定内存怎么分配、放在哪。常用枚举：
 
-| 枚举 | 用途 | 本 demo |
-|---|---|---|
-| `GPUBufferUsage.VERTEX` | 顶点缓冲，供 `setVertexBuffer` | 顶点缓冲 |
-| `GPUBufferUsage.INDEX` | 索引缓冲，供 `setIndexBuffer` | 索引缓冲 |
-| `GPUBufferUsage.UNIFORM` | uniform 常量，供 BindGroup 绑定、shader 只读 | 每对象一个 |
-| `GPUBufferUsage.STORAGE` | storage 缓冲，shader 可读写（compute 常用） | 粒子数据 |
-| `GPUBufferUsage.COPY_DST` | 允许 `writeBuffer` / 拷贝命令写入 | 上面都带 |
-| `GPUBufferUsage.COPY_SRC` | 允许被拷出（读回 CPU 或搬进纹理） | — |
-| `GPUBufferUsage.MAP_READ` / `MAP_WRITE` | 允许 CPU 映射后读写 | — |
-| `GPUBufferUsage.INDIRECT` | 作为 indirect 绘制参数缓冲 | — |
+| 枚举                                    | 用途                                         | 本 demo    |
+| --------------------------------------- | -------------------------------------------- | ---------- |
+| `GPUBufferUsage.VERTEX`                 | 顶点缓冲，供 `setVertexBuffer`               | 顶点缓冲   |
+| `GPUBufferUsage.INDEX`                  | 索引缓冲，供 `setIndexBuffer`                | 索引缓冲   |
+| `GPUBufferUsage.UNIFORM`                | uniform 常量，供 BindGroup 绑定、shader 只读 | 每对象一个 |
+| `GPUBufferUsage.STORAGE`                | storage 缓冲，shader 可读写（compute 常用）  | 粒子数据   |
+| `GPUBufferUsage.COPY_DST`               | 允许 `writeBuffer` / 拷贝命令写入            | 上面都带   |
+| `GPUBufferUsage.COPY_SRC`               | 允许被拷出（读回 CPU 或搬进纹理）            | —          |
+| `GPUBufferUsage.MAP_READ` / `MAP_WRITE` | 允许 CPU 映射后读写                          | —          |
+| `GPUBufferUsage.INDIRECT`               | 作为 indirect 绘制参数缓冲                   | —          |
 
 用法是"或"起来的位组合：顶点缓冲要 `VERTEX | COPY_DST`——既当顶点数据源，又要允许从 CPU 拷入。
 
@@ -207,9 +206,9 @@ device.queue.writeBuffer(buffer, 0, data); // buffer, 目标偏移, CPU 数据
 
 ```js
 const UNIFORM_SIZE = 256;
-const groundUB  = createUniformBuffer(device, UNIFORM_SIZE);
-const charUB    = createUniformBuffer(device, UNIFORM_SIZE);
-const weaponUB  = createUniformBuffer(device, UNIFORM_SIZE);
+const groundUB = createUniformBuffer(device, UNIFORM_SIZE);
+const charUB = createUniformBuffer(device, UNIFORM_SIZE);
+const weaponUB = createUniformBuffer(device, UNIFORM_SIZE);
 ```
 
 uniform 是 shader 每帧要读的常量（viewProj 矩阵、model 矩阵、时间、颜色）。实际数据约 176 字节，统一分 256 字节是留余量、简化对齐。**每个物体一个** uniform buffer，是因为每个物体每帧的 `model` 矩阵不同；各用各的，互不覆盖（也可以合在一块里按偏移分片更新，demo 为了直白选择了分开）。
@@ -233,12 +232,12 @@ device.queue.writeTexture({ texture }, pixels, { bytesPerRow }, [w, h]);
 
 `usage` 枚举对应关系：
 
-| 纹理 usage | 含义 |
-|---|---|
-| `TEXTURE_BINDING` | 供 shader 采样（贴图） |
-| `RENDER_ATTACHMENT` | 作为颜色 / 深度附件被渲染（本 demo 的 depthTexture） |
-| `STORAGE_BINDING` | 供 compute shader 读写 |
-| `COPY_DST` / `COPY_SRC` | 允许写入 / 拷出 |
+| 纹理 usage              | 含义                                                 |
+| ----------------------- | ---------------------------------------------------- |
+| `TEXTURE_BINDING`       | 供 shader 采样（贴图）                               |
+| `RENDER_ATTACHMENT`     | 作为颜色 / 深度附件被渲染（本 demo 的 depthTexture） |
+| `STORAGE_BINDING`       | 供 compute shader 读写                               |
+| `COPY_DST` / `COPY_SRC` | 允许写入 / 拷出                                      |
 
 区别在于纹理是多维的：`writeTexture` 要额外指定 `bytesPerRow`（每行字节数）和 `rowsPerImage`。第二章的 `depthTexture` 用法是 `RENDER_ATTACHMENT` 且不用 `writeTexture`——它每帧由 `loadOp: "clear"` 直接清空（第七章）。
 
@@ -259,10 +258,10 @@ shader 里写 `@group(0) @binding(0)`，就是声明"我要从第 0 组的 0 号
 
 ```js
 // pipelines/opaque.js —— 创建管线时
- device.createRenderPipeline({
-    layout: "auto",
-    // ......
- })
+device.createRenderPipeline({
+  layout: "auto",
+  // ......
+});
 
 // main.js —— 创建 BindGroup 时
 const groundBG = device.createBindGroup({
@@ -275,7 +274,7 @@ const groundBG = device.createBindGroup({
 
 这意味着**两端自动对齐**：shader 里写什么类型，BindGroupLayout 就是什么类型；类型不匹配时创建管线或绑定就会报错，而不是运行到一半才花屏。
 
-### 4.2.2 手动创建 BindGroupLayout 
+### 4.2.2 手动创建 BindGroupLayout
 
 `layout: "auto"` 背后做的事，也可以自己写出来。opaque 管线对应的 shader 只有一条声明：
 
@@ -287,11 +286,13 @@ const groundBG = device.createBindGroup({
 
 ```js
 const opaqueBindGroupLayout = device.createBindGroupLayout({
-  entries: [{
-    binding: 0,
-    visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
-    buffer: { type: "uniform" },
-  }],
+  entries: [
+    {
+      binding: 0,
+      visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+      buffer: { type: "uniform" },
+    },
+  ],
 });
 const opaquePipelineLayout = device.createPipelineLayout({
   bindGroupLayouts: [opaqueBindGroupLayout], // 下标 0 ↔ shader 的 @group(0)
@@ -321,9 +322,9 @@ const groundBG = device.createBindGroup({
 ```js
 entries: [
   { binding: 0, resource: { buffer: uniformBuf } }, // uniform
-  { binding: 1, resource: sampler },                 // 采样器
-  { binding: 2, resource: textureView },             // 贴图视图
-]
+  { binding: 1, resource: sampler }, // 采样器
+  { binding: 2, resource: textureView }, // 贴图视图
+];
 ```
 
 而"多个组"靠编号区分：渲染时 `setBindGroup(0, ...)`、`setBindGroup(1, ...)` 分别绑定，shader 里对应 `@group(0) ...`、`@group(1) ...`。本 demo 简化到每个组只有一个 binding（uniform buffer），但机制一样。
@@ -342,23 +343,27 @@ entries: [
 const module = device.createShaderModule({ code: opaqueCode }); // 校验 WGSL，真正编译在 createRenderPipeline
 
 device.createRenderPipeline({
-  layout: "auto",                        // 自动生成 BindGroupLayout（第四章）
-  vertex: {                              // 顶点阶段
+  layout: "auto", // 自动生成 BindGroupLayout（第四章）
+  vertex: {
+    // 顶点阶段
     module,
-    entryPoint: "vs_main",               // 从同一个模块里点名顶点入口
-    buffers: [VERTEX_LAYOUT],            // 顶点数据怎么取
+    entryPoint: "vs_main", // 从同一个模块里点名顶点入口
+    buffers: [VERTEX_LAYOUT], // 顶点数据怎么取
   },
-  fragment: {                            // 片元阶段
+  fragment: {
+    // 片元阶段
     module,
     entryPoint: "fs_main",
-    targets: [{ format }],               // 颜色写到哪、什么格式（第七章细讲）
+    targets: [{ format }], // 颜色写到哪、什么格式（第七章细讲）
   },
-  primitive: {                           // 图元装配（固定功能）
-    topology: "triangle-list",           // 三角形列表
-    cullMode: "back",                    // 背面剔除
+  primitive: {
+    // 图元装配（固定功能）
+    topology: "triangle-list", // 三角形列表
+    cullMode: "back", // 背面剔除
   },
-  depthStencil: {                        // 深度 / 模板阶段（第七章细讲）
-    format: depthFormat,                 // "depth24plus"
+  depthStencil: {
+    // 深度 / 模板阶段（第七章细讲）
+    format: depthFormat, // "depth24plus"
     depthWriteEnabled: true,
     depthCompare: "less",
   },
@@ -382,7 +387,7 @@ device.createRenderPipeline({
 export const VERTEX_LAYOUT = {
   arrayStride: 32, // position(12) + normal(12) + uv(8) = 32 字节
   attributes: [
-    { shaderLocation: 0, offset: 0,  format: "float32x3" }, // position
+    { shaderLocation: 0, offset: 0, format: "float32x3" }, // position
     { shaderLocation: 1, offset: 12, format: "float32x3" }, // normal
     { shaderLocation: 2, offset: 24, format: "float32x2" }, // uv
   ],
@@ -404,13 +409,13 @@ fn vs_main(
 
 ### 5.3 一张表看清三层对应关系
 
-| 数据 | CPU / API 侧 | WGSL 侧 |
-|---|---|---|
-| 顶点属性 | `VERTEX_LAYOUT.attributes[i].shaderLocation` | VS 入参 `@location(i)` |
-| 每帧常量 | BindGroup `entries[{ binding: m }]` → buffer | `@group(g) @binding(m) var<uniform> u: Uniforms` |
-| VS 输出给 FS | `VSOut` 结构体 | `@builtin(position)` 给光栅化；`@location(i)` 插值后进 FS |
-| 颜色输出 | `fragment.targets[i]` ↔ RenderPass 颜色附件 i | FS 返回 `@location(i) vec4f` |
-| 深度 | `depthStencil.format` ↔ 深度附件 | 片元深度来自 VS 输出的 `@builtin(position)` |
+| 数据         | CPU / API 侧                                  | WGSL 侧                                                   |
+| ------------ | --------------------------------------------- | --------------------------------------------------------- |
+| 顶点属性     | `VERTEX_LAYOUT.attributes[i].shaderLocation`  | VS 入参 `@location(i)`                                    |
+| 每帧常量     | BindGroup `entries[{ binding: m }]` → buffer  | `@group(g) @binding(m) var<uniform> u: Uniforms`          |
+| VS 输出给 FS | `VSOut` 结构体                                | `@builtin(position)` 给光栅化；`@location(i)` 插值后进 FS |
+| 颜色输出     | `fragment.targets[i]` ↔ RenderPass 颜色附件 i | FS 返回 `@location(i) vec4f`                              |
+| 深度         | `depthStencil.format` ↔ 深度附件              | 片元深度来自 VS 输出的 `@builtin(position)`               |
 
 回到第四章的 BindGroup：`entries` 里 `binding: 0` 对应 shader 的 `@group(0) @binding(0) var<uniform> u: Uniforms`。渲染时 `setBindGroup(0, groundBG)` 把 groundUB 插进 0 号槽，VS / FS 里读 `u.viewProj`、`u.model` 拿到的就是这块显存里的最新数据。
 
@@ -478,11 +483,11 @@ GPU 取出命令清单后，在 Render Pass 内部逐段执行。
 
 **批次** = 一次 `setPipeline` 之后、下一次 `setPipeline` 之前的所有 draw。本 demo 有 3 个批次：
 
-| 批次 | 管线 | 包含的 draw |
-|---|---|---|
-| 1 | opaque | 草地 → 人物 → 武器 |
-| 2 | aura | 法术环 ×2 |
-| 3 | particles | 粒子（实例化 ×count） |
+| 批次 | 管线      | 包含的 draw           |
+| ---- | --------- | --------------------- |
+| 1    | opaque    | 草地 → 人物 → 武器    |
+| 2    | aura      | 法术环 ×2             |
+| 3    | particles | 粒子（实例化 ×count） |
 
 每个批次内的 draw **按录制顺序依次发起**，但这不是"串行掏空流水线"。GPU 有成千上万个着色器核心：
 
@@ -522,15 +527,17 @@ context.configure({ device, format, alphaMode: "opaque" });
 ```js
 const colorView = context.getCurrentTexture().createView();
 const renderPass = encoder.beginRenderPass({
-  colorAttachments: [{
-    view: colorView,          // 颜色写到这里
-    clearValue: CLEAR_COLOR,  // 清屏色（天空蓝）
-    loadOp: "clear",          // 开始前先清空
-    storeOp: "store",         // 结束后保留
-  }],
+  colorAttachments: [
+    {
+      view: colorView, // 颜色写到这里
+      clearValue: CLEAR_COLOR, // 清屏色（天空蓝）
+      loadOp: "clear", // 开始前先清空
+      storeOp: "store", // 结束后保留
+    },
+  ],
   depthStencilAttachment: {
-    view: depthView,          // 深度读写这里
-    depthClearValue: 1,       // 初始"无穷远"
+    view: depthView, // 深度读写这里
+    depthClearValue: 1, // 初始"无穷远"
     depthLoadOp: "clear",
     depthStoreOp: "store",
   },
@@ -554,11 +561,170 @@ const renderPass = encoder.beginRenderPass({
 
 于是两个附件与管线配置的对应关系是：
 
-| 管线配置 | 附件 | 作用 |
-|---|---|---|
-| `fragment.targets[0].format` ↔ 混合配置 | `colorAttachments[0].view`（colorView） | 颜色输出与混合 |
+| 管线配置                                                     | 附件                                       | 作用           |
+| ------------------------------------------------------------ | ------------------------------------------ | -------------- |
+| `fragment.targets[0].format` ↔ 混合配置                      | `colorAttachments[0].view`（colorView）    | 颜色输出与混合 |
 | `depthStencil.format` / `depthCompare` / `depthWriteEnabled` | `depthStencilAttachment.view`（depthView） | 深度测试与写入 |
 
 `depthWriteEnabled` 的差别解释了 demo 里的两套管线：opaque 开（`true`）——草地 / 人物 / 武器要写深度，后面的物体才能被正确遮挡；aura 关（`false`）——法术环只测深度（被墙挡住的不显示）但不写深度，避免半透明表面互相错误遮挡。混合配置则定义法术环如何"发光"：`src-alpha` 源色 × 透明度 + `one` 目标色直接加，就是常见的加色光效。
 
-至此整条链完整了：**几何进显存 → BindGroup 把每帧参数插给 shader → pipeline 焊死取数与输出规则 → 每帧更新 uniform、录制命令 → submit 后 GPU 按批次并行跑完 VS / 光栅化 / FS / 深度 / 混合 → 写进 colorView → 呈现到屏幕。** 概念通了之后，WebGPU 的 API 不过是这条链上的一个个名字而已。
+不透明与法术环走的是"顶点缓冲 + 索引绘制"的老路；头顶飞起的粒子则是另一条链路：**storage 缓冲存状态 → compute 更新 → render 实例化绘制**。第八章专门把这条链路拆开讲透。
+
+---
+
+## 八、粒子系统：从 particleBuffer 到 compute 再到 draw
+
+粒子系统是既有computer 流水线 又有 render 流水线，先实时计算出粒子的位置和生命值，然后同步将它绘制出来，这个非常典型的例子，我们看它是如何实现的。
+
+### 8.1 创建一个 STORAGE buffer
+
+粒子的数据路径：
+
+```text
+Storage Buffer → BindGroup → VS 里手动 particles[iid] → draw(vertexCount, instanceCount)
+```
+
+因此 `particleBuffer` 创建时**只标记 `STORAGE`**，不需要 `VERTEX`，它初始化随机了一些值，填入buffer, 之后关联2个 “绑定组”
+
+```js
+// pipelines/particles.js
+const particleBuffer = device.createBuffer({
+  size: PARTICLE_COUNT * PARTICLE_FLOATS * 4, // 46 × 8 × 4 = 1472 字节
+  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+});
+
+const initial = new Float32Array(PARTICLE_COUNT * PARTICLE_FLOATS);
+// ..... 随机
+device.queue.writeBuffer(particleBuffer, 0, initial);
+
+const computeBindGroup = device.createBindGroup({
+  layout: computePipeline.getBindGroupLayout(0),
+  entries: [
+    { binding: 0, resource: { buffer: particleBuffer } },
+    { binding: 1, resource: { buffer: simUniform } },
+  ],
+});
+
+const renderBindGroup = device.createBindGroup({
+  layout: renderPipeline.getBindGroupLayout(0),
+  entries: [
+    { binding: 0, resource: { buffer: particleBuffer } },
+    { binding: 1, resource: { buffer: frameUniform } },
+  ],
+});
+```
+
+### 8.2 单粒子在 buffer 里的布局
+
+每个粒子占 8 个 float（32 字节），与 WGSL 的 `Particle` 结构体一一对应：
+
+```text
+偏移:  0      4      8     12     16     20     24     28
+      pos.x  pos.y  pos.z  life   vel.x  vel.y  vel.z  seed
+      |-------- vec3 --------| f32 |-------- vec3 --------| f32 |
+```
+
+```wgsl
+// particles_compute.wgsl / particles_render.wgsl（两边必须一致）
+struct Particle {
+  pos: vec3f,   // 世界位置
+  life: f32,    // 剩余寿命（秒）；≤0 时重生
+  vel: vec3f,   // 世界速度
+  seed: f32,    // [0,1) 稳定随机：尺寸、色相、涡旋相位
+}
+```
+
+之后每帧**不再** `writeBuffer` 整张粒子表——位置、速度、寿命的更新全部在 GPU compute shader 里完成。
+
+### 8.3 compute Pass更新缓存
+
+| 缓冲           | 大小  | 内容                                  | 谁读           |
+| -------------- | ----- | ------------------------------------- | -------------- |
+| `simUniform`   | 32 B  | 发射点 xyz、dt、time、particleCount   | compute shader |
+| `frameUniform` | 128 B | viewProj、cameraRight、cameraUp、time | render shader  |
+
+`particleBuffer` 是"粒子状态表"；`simUniform` / `frameUniform` 是"本帧模拟与渲染参数"——和 opaque 物体每帧更新 uniform 一样，属于第六章的概念 3。
+
+每帧在 Render Pass 之前，先跑一段 compute：
+
+```js
+// main.js
+const sim = new Float32Array(8);
+sim[0] = headWorld[0]; // 发射点 = 人物头顶世界坐标
+sim[1] = headWorld[1];
+sim[2] = headWorld[2];
+sim[4] = dt;
+sim[5] = time;
+sim[6] = particles.count;
+device.queue.writeBuffer(particles.simUniform, 0, sim);
+
+const computePass = encoder.beginComputePass();
+computePass.setPipeline(particles.computePipeline);
+computePass.setBindGroup(0, particles.computeBindGroup);
+computePass.dispatchWorkgroups(Math.ceil(particles.count / 64));
+computePass.end();
+```
+
+`particles_compute.wgsl` 声明 `@workgroup_size(64)`，即每个 workgroup 有 64 个线程。`global_invocation_id.x` 直接当作粒子下标 `i`：
+`dispatchWorkgroups(ceil(46 / 64))` = `dispatchWorkgroups(1)`：启动 1 个 workgroup、64 个线程，其中线程 0～45 各处理一颗粒子，线程 46～63 被边界检查直接 `return`。
+更新后的 `pos / vel / life` **就写在本帧的 `particleBuffer` 显存里**，不必读回 CPU。下一阶段的 render shader 通过同一个 binding 0 读到最新值。
+
+### 8.4 Render Pass：无顶点缓冲的实例化广告牌
+
+```js
+renderPass.setPipeline(particles.renderPipeline);
+renderPass.setBindGroup(0, particles.renderBindGroup);
+renderPass.draw(6, particles.count); // 6 顶点 × 46 实例
+```
+
+通过 iid 实例索引，从particleBuffer中取出当前粒子。对比不透明物体，这里**没有** `setVertexBuffer` / `setIndexBuffer`——几何完全在顶点着色器里生成。
+
+#### `draw(6, 46)` 的两个参数
+
+```text
+draw(vertexCount, instanceCount)
+      ↓                ↓
+      6               46
+  每个粒子的          要画多少个
+  顶点数（2 个        粒子（实例数）
+  三角形 = 6）
+```
+
+总顶点调用次数 = `6 × 46 = 276`。每个调用里，GPU 注入两个内置变量：
+
+- `@builtin(vertex_index)` → `vid`，取值 `0..5`，选四边形上的角点；
+- `@builtin(instance_index)` → `iid`，取值 `0..45`，选 `particles[iid]`。
+
+
+
+```wgsl
+@vertex
+fn vs_main(
+  @builtin(vertex_index) vid: u32,
+  @builtin(instance_index) iid: u32,
+) -> VSOut {
+  // 6 个角点 = 两个三角形，在 shader 里硬编码
+  var corners = array<vec2f, 6>(
+    vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(1.0, 1.0),
+    vec2f(-1.0, -1.0), vec2f(1.0, 1.0),  vec2f(-1.0, 1.0),
+  );
+  let corner = corners[vid];
+  let p = particles[iid];   // 从 storage 读粒子，不是从 vertex buffer
+
+  let size = 0.04 + p.seed * 0.03;
+  // 广告牌：始终朝向相机平面
+  let world =
+    p.pos
+    + frame.cameraRight.xyz * corner.x * size
+    + frame.cameraUp.xyz * corner.y * size;
+
+  out.position = frame.viewProj * vec4f(world, 1.0);
+  // ...
+}
+```
+
+`frameUniform` 里每帧由 CPU 写入 `viewProj`、`cameraRight`、`cameraUp`（`main.js` 里根据相机 eye / target / up 算出），这样每个粒子的小四边形始终面向相机，形成**广告牌（billboard）**。
+
+片元着色器 `fs_main` 根据 UV 画径向软圆光斑，并按 `life` 做淡入淡出、`seed` 做色相变化；管线开了加色混合（`src-alpha` + `one`），`depthWriteEnabled: false` 避免半透明粒子互相写深度。
+
+至此整条链完整了：**几何进显存 → BindGroup 把每帧参数插给 shader → pipeline 焊死取数与输出规则 → 每帧更新 uniform、录制命令 → submit 后 GPU 先 compute 更新粒子、再按批次并行跑完 VS / 光栅化 / FS / 深度 / 混合 → 写进 colorView → 呈现到屏幕。** 概念通了之后，WebGPU 的 API 不过是这条链上的一个个名字而已。
