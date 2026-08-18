@@ -52,6 +52,9 @@ export async function initWebGPU(canvas) {
 
 export const ELBOW_Y = -1.0;
 
+/** pos3 + normal3 + boneIdx2 + weight2 */
+const FLOATS_PER_VERTEX = 10;
+
 /**
  * @param {number} cx @param {number} cy @param {number} cz
  * @param {number} hx @param {number} hy @param {number} hz
@@ -73,7 +76,7 @@ function boxVerts(cx, cy, cz, hx, hy, hz, w0, w1) {
       out.push(
         cx + c[0], cy + c[1], cz + c[2],
         f.n[0], f.n[1], f.n[2],
-        0, 1, w0, w1, 0, 0,
+        0, 1, w0, w1,
       );
     }
   }
@@ -87,7 +90,7 @@ export function createArmMesh() {
   const elbow = boxVerts(0, ELBOW_Y, 0, 0.12, 0.06, 0.12, 0.5, 0.5);
   const raw = [...upper, ...lower, ...elbow];
   const verts = new Float32Array(raw);
-  const vCount = verts.length / 11;
+  const vCount = verts.length / FLOATS_PER_VERTEX;
   const faceCount = vCount / 4;
   const indices = new Uint16Array(faceCount * 6);
   for (let f = 0; f < faceCount; f++) {
@@ -104,7 +107,7 @@ export function createArmMesh() {
 }
 
 export const VERTEX_LAYOUT = {
-  arrayStride: 44,
+  arrayStride: FLOATS_PER_VERTEX * 4,
   attributes: [
     { shaderLocation: 0, offset: 0, format: "float32x3" },
     { shaderLocation: 1, offset: 12, format: "float32x3" },
