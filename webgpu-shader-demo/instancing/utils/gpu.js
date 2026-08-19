@@ -26,6 +26,7 @@ export async function initWebGPU(canvas) {
   function recreateDepth() {
     if (depthTexture) depthTexture.destroy();
     depthTexture = device.createTexture({
+      label: "depth",
       size: [size.width, size.height],
       format: DEPTH_FORMAT,
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
@@ -33,21 +34,46 @@ export async function initWebGPU(canvas) {
     depthView = depthTexture.createView();
   }
 
-  function resize() {
+  function ensureSize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    size.width = Math.max(1, Math.floor(canvas.clientWidth * dpr));
-    size.height = Math.max(1, Math.floor(canvas.clientHeight * dpr));
-    canvas.width = size.width;
-    canvas.height = size.height;
+    const w = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+    const h = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+    if (w === canvas.width && h === canvas.height && depthTexture) return;
+    canvas.width = w;
+    canvas.height = h;
+    size.width = w;
+    size.height = h;
     context.configure({ device, format, alphaMode: "opaque" });
     recreateDepth();
-    return size;
   }
 
-  resize();
-  window.addEventListener("resize", resize);
+  /** 每帧调用：对齐 canvas，并保证 depth 与当前 swapchain 同尺寸。 */
+  function acquireFrameViews() {
+    ensureSize();
+    const colorTex = context.getCurrentTexture();
+    if (!depthTexture || depthTexture.width !== colorTex.width || depthTexture.height !== colorTex.height) {
+      size.width = colorTex.width;
+      size.height = colorTex.height;
+      recreateDepth();
+    }
+    return { colorView: colorTex.createView(), depthView };
+  }
 
-  return { device, context, format, get size() { return size; }, get depthView() { return depthView; } };
+  ensureSize();
+  window.addEventListener("resize", ensureSize);
+  if (typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(ensureSize).observe(canvas);
+  }
+
+  return {
+    device,
+    context,
+    format,
+    ensureSize,
+    acquireFrameViews,
+    get size() { return size; },
+    get depthView() { return depthView; },
+  };
 }
 
 /** @returns {{ vertices: Float32Array, indices: Uint16Array }} pos3 only, unit cube */

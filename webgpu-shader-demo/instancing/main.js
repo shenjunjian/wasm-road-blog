@@ -25,16 +25,19 @@ async function main() {
   let useInstancing = true;
 
   try {
-    const { device, context, format, depthView } = await initWebGPU(canvas);
+    const gpu = await initWebGPU(canvas);
+    const { device, format } = gpu;
     const { vertices, indices } = createSmallCube();
 
     const vb = device.createBuffer({
+      label: "mesh-vertex",
       size: vertices.byteLength,
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });
     device.queue.writeBuffer(vb, 0, vertices);
 
     const ib = device.createBuffer({
+      label: "mesh-index",
       size: indices.byteLength,
       usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
     });
@@ -42,12 +45,15 @@ async function main() {
 
     const instanceData = buildInstanceData(TOTAL_INSTANCES);
     const instanceBuf = device.createBuffer({
+      label: "instance-data",
       size: instanceData.byteLength,
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });
     device.queue.writeBuffer(instanceBuf, 0, instanceData);
 
+    // viewProj(64) + model(64) + u32 + 3×u32 pad = 144，必须与 WGSL Uniforms 一致
     const uniformBuf = device.createBuffer({
+      label: "uniforms",
       size: 144,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
@@ -60,6 +66,7 @@ async function main() {
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] });
     const module = device.createShaderModule({ code: shaderCode });
     const pipeline = device.createRenderPipeline({
+      label: "instancing-pipeline",
       layout: pipelineLayout,
       vertex: {
         module,
@@ -100,6 +107,7 @@ async function main() {
     updateStatus();
 
     function frame(now) {
+      const { colorView, depthView } = gpu.acquireFrameViews();
       const t = (now - t0) * 0.001;
       const aspect = canvas.width / canvas.height;
       const viewProj = mat4Multiply(
@@ -112,10 +120,10 @@ async function main() {
       uniformData.set(view, 0);
       uniformData[32] = useInstancing ? 1 : 0;
 
-      const encoder = device.createCommandEncoder();
+      const encoder = device.createCommandEncoder({ label: "frame" });
       const pass = encoder.beginRenderPass({
         colorAttachments: [{
-          view: context.getCurrentTexture().createView(),
+          view: colorView,
           clearValue: { r: 0.06, g: 0.08, b: 0.14, a: 1 },
           loadOp: "clear",
           storeOp: "store",

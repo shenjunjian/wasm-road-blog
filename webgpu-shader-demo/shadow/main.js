@@ -27,7 +27,8 @@ async function main() {
   let shadowMode = 2;
 
   try {
-    const { device, context, format, depthView } = await initWebGPU(canvas);
+    const gpu = await initWebGPU(canvas);
+    const { device, context, format } = gpu
 
     const plane = createPlane(10);
     const cube = createUnitCube();
@@ -193,7 +194,7 @@ async function main() {
           storeOp: "store",
         }],
         depthStencilAttachment: {
-          view: depthView,
+          view: gpu.depthView,
           depthClearValue: 1,
           depthLoadOp: "clear",
           depthStoreOp: "store",
