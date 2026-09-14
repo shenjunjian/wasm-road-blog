@@ -1,0 +1,11 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- Godot 项目默认图标：圆形渐变背景 + 中心圆点。本 demo 借用做占位 Sprite2D 贴图。 -->
+  <defs>
+    <radialGradient id="g" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#e8b339"/>
+      <stop offset="100%" stop-color="#478cbf"/>
+    </radialGradient>
+  </defs>
+  <circle cx="64" cy="64" r="60" fill="url(#g)" stroke="#ffffff" stroke-width="3"/>
+  <circle cx="64" cy="64" r="14" fill="#ffffff"/>
+</svg>

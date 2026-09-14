@@ -1,0 +1,33 @@
+; Engine configuration file.
+; 这是 01-overview 章节的最小 demo 工程入口。
+;
+; Godot 的 project.godot 是 INI 格式，每个 section 都对应一类配置：
+;   [application]   应用层（项目名、入口场景）
+;   [display]       窗口与分辨率
+;   [rendering]     渲染管线与默认环境
+;   [physics]       物理引擎与固定帧率
+;
+; 你也可以用编辑器菜单 Project -> Project Settings 改这些值，
+; 编辑器会回写到这个文件。
+
+config_version=5
+
+[application]
+
+config/name="01 Overview"
+config/description="第 01 章 demo：一个会在屏幕里左右弹跳的 Sprite2D。展示编辑器五大面板的使用方式。"
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.3", "Forward Plus")
+config/icon="res://icon.svg"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
+environment/defaults/default_clear_color=Color(0.102, 0.102, 0.102, 1)
