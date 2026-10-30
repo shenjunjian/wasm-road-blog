@@ -1,3 +1,7 @@
+---
+outline: [2, 6]
+---
+
 # HarmonyOS ArkUI 学习指南（面向 TypeScript / 前端开发者）
 
 > 资料来源：OpenHarmony 官方 ArkUI 文档仓库（`openharmony/docs`，与华为开发者官网 ArkUI 栏目同源，zh-cn/application-dev 全量），以及华为 HarmonyOS 文档中心的专有 Kit 页面（Scan Kit、IAP Kit、Payment Kit、Push Kit）。API 名称、装饰器、配置字段均取自上述文档原文；文档未给出的写法一律不写。
@@ -257,7 +261,57 @@ export default class EntryAbility extends UIAbility {
 - 从后台回到前台：`onNewWant()` → `onWindowStageCreate()` → `onForeground()`（对应进程保活但窗口已销毁的情形）；
 - 退到后台：`onBackground()`。
 
-**ExtensionAbility** 派生类型（文档中出现的）：ServiceExtensionAbility（无界面后台服务）、FormExtensionAbility（服务卡片）、InputMethodExtensionAbility、UIExtensionAbility、DataShareExtensionAbility 等。入口同样是继承 + `onCreate`/`onSessionCreate` 等回调。
+
+#### 2.1.1 什么是 ExtensionAbility 
+
+ExtensionAbility 是 HarmonyOS Stage 模型中提供特定场景扩展能力的应用组件，它本身不拥有独立窗口，因此不能直接包含 WindowStage；普通的 ExtensionAbility 也不能直接承载 UI 组件，只有其带 UI 的派生类型（如 UIExtensionAbility）才能通过系统提供的会话对象加载包含组件的页面，且这些 UI 内容是嵌入宿主应用窗口显示的。
+
+ExtensionAbility 是一种面向特定场景的应用组件，每一个具体场景对应一个不同类型的 ExtensionAbility，开发者通过使用不同类型的 ExtensionAbility 组件，可以扩展和丰富应用功能，更好地与其他应用或系统开展交互<rsub ref="H.1.1">1</rsub>。它提供特定场景（如卡片、输入法）的扩展能力，满足更多的使用场景<rsub ref="G.1.3">2</rsub>。
+
+常见的类型包括：
+
+| 类型 | 场景 |
+|------|------|
+| FormExtensionAbility | 卡片（桌面小卡片、互动卡片等） |
+| InputMethodExtensionAbility | 输入法 |
+| WorkSchedulerExtensionAbility | 延时任务 |
+| DriverExtensionAbility | 用户态扩展驱动<rsub ref="H.1.9">9</rsub> |
+| AccessibilityExtensionAbility | 辅助功能（无障碍）<rsub ref="G.2.5">10</rsub> |
+| UIExtensionAbility / EmbeddedUIExtensionAbility | 带 UI 的功能扩展（悬浮窗、快捷菜单等）<rsub ref="G.1.8">4</rsub> |
+
+需要注意，ExtensionAbility 是特定场景扩展能力的基类，继承自 Ability，未新增属性和方法，不支持开发者直接继承，开发者应继承其具体子类（如 FormExtensionAbility 等）来实现特定场景的扩展能力<rsub ref="G.2.6">3</rsub>。
+
+##### 能否包含 WindowStage
+
+不能。在 Stage 模型下，应用主窗由 UIAbility 通过 WindowStage 管理，开发者只能在 UIAbility 的 onWindowStageCreate 回调中接收 WindowStage 实例<rsub ref="G.1.1">7</rsub>。ExtensionAbility 的生命周期回调中没有 onWindowStageCreate，系统不会为它创建 WindowStage。
+
+##### 能否直接包含 Component（UI 组件）
+
+分两种情况：
+
+1. **普通 ExtensionAbility**（如 FormExtensionAbility、WorkSchedulerExtensionAbility）：不承载 UI，类中不能直接写 ArkUI 组件。卡片等场景的 UI 由系统通过其他机制（如卡片前端页面）呈现。
+
+2. **带 UI 的扩展组件**（UIExtensionAbility 及其派生类，如 EmbeddedUIExtensionAbility、ShareExtensionAbility）：可以呈现 UI，但方式与 UIAbility 不同——它运行时没有独立窗口，而是作为宿主的节点嵌入宿主窗口显示，任务列表中也没有对应的任务视图<rsub ref="G.1.8">4</rsub>。其 UI 通过 UIExtensionContentSession 加载：当宿主应用拉起指定的 UIExtensionAbility 组件时，系统创建 UIExtensionContentSession 对象，并通过 onSessionCreate 回调传递给开发者<rsub ref="G.2.1">5</rsub>，开发者调用 session.loadContent 加载页面<rsub ref="G.2.2">6</rsub>，组件（Component）定义在被加载的页面文件中，而不是直接写在 ExtensionAbility 类里。
+
+两者的差异可概括如下：
+
+```mermaid
+flowchart TD
+    A[应用组件] --> B[UIAbility<br/>拥有独立窗口]
+    A --> C[ExtensionAbility<br/>无独立窗口]
+    B --> D[onWindowStageCreate 回调<br/>获得 WindowStage<br/>windowStage.loadContent 加载页面]
+    C --> E[普通扩展类型<br/>如卡片 输入法 延时任务<br/>不承载 UI]
+    C --> F[带 UI 扩展类型<br/>如 UIExtensionAbility]
+    F --> G[onSessionCreate 回调<br/>获得 UIExtensionContentSession<br/>session.loadContent 加载页面<br/>UI 嵌入宿主窗口显示]
+```
+ **补充说明**
+
+- 一个 UIExtensionAbility 组件对应一个 UIExtensionContentSession 对象，各组件的会话对象之间互不影响<rsub ref="G.2.1">5</rsub>。
+- UIExtensionAbility 组件不支持三方应用直接继承，需通过其派生类（如 ShareExtensionAbility）使用<rsub ref="H.1.3">11</rsub>。
+- 从架构设计角度，应用的拓展功能（如卡片和分享业务）不会作为单独的任务和窗口形态运行，由系统提供的独立 ExtensionAbility 承载，建议通过 Feature 类型的 HAP 来承载这类组件，以便更好地拆分业务<rsub ref="G.1.9">12</rsub>。
+- 若确实需要独立窗口与用户交互，应使用 UIAbility 而非 ExtensionAbility。
+内容由 AI 生成，仅供参考
+
 
 ### 2.2 模块配置 module.json5（≈ 每个包的 package.json + manifest）
 

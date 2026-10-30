@@ -15,7 +15,7 @@ export const sidebar: DefaultTheme.Sidebar = {
   "/": [
     {
       text: "WebGPU 进阶",
-      collapsed: false,
+      collapsed: true,
       items: [
         { text: "WebGPU 全景流程[✅]", link: "/webgpu/deep" },
         { text: "系列导读", link: "/webgpu/" },
@@ -35,7 +35,7 @@ export const sidebar: DefaultTheme.Sidebar = {
     },
     {
       text: "专题长文",
-      collapsed: false,
+      collapsed: true,
       items: [
         {
           text: "Wasm 基础：原理、Rust 编译与 Node 集成",
@@ -60,7 +60,7 @@ export const sidebar: DefaultTheme.Sidebar = {
     },
     {
       text: "Rust 中高级",
-      collapsed: false,
+      collapsed: true,
       items: [
         { text: "系列导读", link: "/rust-lang/" },
         { text: "01 · 模块、包管理与 Cargo.toml", link: "/rust-lang/01-modules-cargo" },
@@ -73,7 +73,7 @@ export const sidebar: DefaultTheme.Sidebar = {
     },
     {
       text: "Rust 前端工具链",
-      collapsed: false,
+      collapsed: true,
       items: [
         { text: "系列导读", link: "/rust-tools/" },
         { text: "01 · Oxc — VoidZero 生态核心", link: "/rust-tools/01-oxc" },
@@ -85,7 +85,7 @@ export const sidebar: DefaultTheme.Sidebar = {
     },
     {
       text: "Godot 4.x",
-      collapsed: false,
+      collapsed: true,
       items: [
         { text: "系列导读", link: "/godot/" },
         { text: "01 · 概览与编辑器入门", link: "/godot/01-overview" },
@@ -104,7 +104,7 @@ export const sidebar: DefaultTheme.Sidebar = {
     },
     {
       text: "鸿蒙开发",
-      collapsed: false,
+      collapsed: true,
       items: [
         { text: "arkts 入门", link: "/harmonyOS/learn-arkts" },
         { text: "arkui 入门", link: "/harmonyOS/learn-arkui" },
