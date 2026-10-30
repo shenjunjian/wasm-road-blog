@@ -368,6 +368,118 @@ flowchart TD
 
 选型要点：HAR 会随每个引用方复制一份（包体积膨胀）；HSP 适合多个 HAP 共用的大体积公共代码。跨应用发布用原子化服务（`in-app-hsp.md`、`har-package.md`、`hap-package.md`）。
 
+
+#### 2.3.1 与 Windows 程序的概念类比
+
+| HarmonyOS 包形态 | Windows 对应概念 | 核心特征 |
+|---|---|---|
+| Entry HAP | 主程序 exe | 应用入口，必装模块，独立安装运行 |
+| Feature HAP | 按需加载的功能组件/插件 exe | 可从应用市场按需分发安装 |
+| HAR | 静态库 .lib | 编译时被"复制"进每个引用方，多包引用会产生多份拷贝<rsub ref="H.1.2">3</rsub> |
+| HSP | 动态库 .dll | 运行时共享同一份代码和资源，多模块共用，避免重复拷贝<rsub ref="H.1.9">4</rsub> |
+| App（.app） | msi / setup 安装包 | 多个 HAP 打包后的上架发布产物 |
+
+这个类比可以帮助建立直觉，但要注意一个关键差异：Windows 的 dll 可以跨进程、跨应用共享，而 **HSP 仅支持同一应用内的多模块（HAP/HSP）共享**；跨应用复用代码要走 HAR 发布到 OHPM 仓库的路线<rsub ref="H.1.2">3</rsub>。
+
+#### 2.3.2 三种包分别如何构建
+
+构建产物由工程中 Module 的类型决定：**Ability 类型的 Module 编译后生成 HAP，Library 类型的 Module 编译后生成 HAR 或 HSP**<rsub ref="H.2.5">5</rsub>。也就是说，先在 DevEco Studio 中创建对应类型的模块（Entry/Feature Ability 模块、Static Library 模块、Shared Library 模块），再执行构建。
+
+构建方式有两种：
+
+**方式一：DevEco Studio 图形界面**
+
+在菜单栏选择 Build，即可执行对应的构建任务（如 Build Hap(s)、Build App 等）。
+
+**方式二：命令行 hvigorw**
+
+常用构建任务包括：`assembleHap`（构建 HAP）、`assembleHsp`（构建 HSP）、`assembleHar`（构建 HAR）、`assembleApp`（构建 App）<rsub ref="H.2.1">6</rsub>。典型命令示例如下：
+
+```bash
+# 清理工程
+hvigorw clean --no-daemon
+
+# 构建 HAP，产物：{模块名}/build/{productName}/outputs/{targetName}/xxx.hap
+hvigorw assembleHap --mode module -p product=default -p buildMode=debug --no-daemon
+
+# 构建 HSP，产物：{模块名}/build/{productName}/outputs/{targetName}/xxx.hsp
+hvigorw assembleHsp --mode module -p module=library@default -p product=default --no-daemon
+
+# 构建 HAR，产物：{模块名}/build/{productName}/outputs/{targetName}/outputs/xxx.har
+hvigorw assembleHar --mode module -p module=library1@default -p product=default --no-daemon
+
+# 构建 App（上架产物），产物：build/outputs/{productName}/xxx.app
+hvigorw assembleApp --mode project -p product=default -p buildMode=debug --no-daemon
+```
+
+
+其中 `-p buildMode` 缺省时，构建 HAP/HSP/HAR 默认为 debug 模式，构建 App 默认为 release 模式<rsub ref="H.2.1">6</rsub>。当前 HAR 的默认构建产物是包含 abc 字节码的字节码 HAR 包，相比源码 HAR 可提升使用方的编译效率并降低代码泄露风险<rsub ref="H.1.9">4</rsub>。
+
+#### 2.3.3 共享包如何被引用
+
+分**应用内引用**和**跨应用/跨工程引用**两种场景：
+
+**1. 应用内引用（HAR 和 HSP 均可）**
+
+在使用方模块的 `oh-package.json5` 的 `dependencies` 字段中声明依赖<rsub ref="H.1.6">8</rsub>，支持三种来源：
+
+```jsonc
+{
+  "dependencies": {
+    "library": "file:../library",          // 源码依赖（本地模块）
+    "myhar": "file:./libs/myhar.har",      // 本地 HAR 包
+    "myhsp": "file:./libs/myhsp.tgz"       // 本地 HSP 包
+  }
+}
+```
+
+配置后在代码中直接 import 使用：
+
+```typescript
+// HAR 与 HSP 的引用方式一致，导入路径为 oh-package.json5 中声明的包名
+import { add } from 'library';
+
+let result: number = add(1, 2);
+```
+
+**2. 跨应用/跨工程引用（走 OHPM 仓库）**
+
+- **发布**：HAR 构建出 `.har` 文件后，配置发布码并执行 `ohpm publish <HAR路径>` 发布到 OHPM 三方库中心仓或企业私仓<rsub ref="H.1.3">9</rsub>；
+- **引用**：使用方在 `oh-package.json5` 中声明远端依赖后执行 `ohpm install`，或先通过 `ohpm config set registry your_registry1,your_registry2` 配置仓库地址<rsub ref="H.1.10">10</rsub>；
+- **HSP 跨工程的特殊处理**：HSP 不能像 HAR 那样直接跨应用共享。如需跨工程/跨团队复用，应使用 **集成态 HSP（Integrated HSP）**——它构建时不与特定应用包名耦合，以 `.tgz` 包形式发布到私仓，使用方依赖后编译时工具链自动将 HSP 包名替换为宿主应用包名并合入宿主<rsub ref="H.1.2">3</rsub>。
+
+整体流程如下：
+
+```mermaid
+flowchart TD
+    A[创建工程模块] --> B[Ability 类型模块]
+    A --> C[Library 类型模块]
+    B --> D[hvigorw assembleHap<br/>生成 HAP]
+    C --> E[hvigorw assembleHar<br/>生成 HAR]
+    C --> F[hvigorw assembleHsp<br/>生成 HSP]
+    D --> G[hvigorw assembleApp<br/>打包为 App 上架]
+    E --> H[ohpm publish 发布到中心仓或私仓]
+    F --> I[编译为 tgz 集成态 HSP<br/>发布到私仓]
+    H --> J[使用方 ohpm install<br/>dependencies 声明依赖]
+    I --> K[使用方编译时自动合入宿主应用]
+    J --> L[代码中 import 引用]
+    K --> L
+```
+
+#### 2.3.4 选型补充说明
+
+- 当应用内多个 HAP/HSP 依赖同一个共享包时，用 HSP 替代 HAR 可避免代码和资源的重复拷贝，显著减小包体积<rsub ref="H.1.9">4</rsub>；但大量使用 HSP 会增加编译耗时和内存占用，不需要按需加载特性的模块反而建议改造为 HAR<rsub ref="H.1.2">3</rsub>。
+- HAR 适合组件化、能力沉淀与多工程复用；HSP 适合同一应用内多模块运行时共享；HAP 负责应用的功能拆分与按需分发<rsub ref="H.2.2">2</rsub>。
+- 集成态 HSP 要求 API 12 及以上版本，且需将工程 `useNormalizedOHMUrl` 设置为 true。
+- 多个 HSP 依赖同一个 HAR 属于需要规避的依赖冲突场景，建议通过依赖治理（如 ohpm 的 override 机制）收敛依赖链路<rsub ref="H.2.9">11</rsub>。
+内容由 AI 生成，仅供参考
+
+
+
+
+
+
+
 ### 2.4 Ability 间跳转：Want
 
 `Want` 是「我想做什么」的意图描述对象（`application-models/want-overview.md`）：
@@ -398,6 +510,180 @@ context.terminateSelf();           // 结束当前 Ability
 `actions-entities.md` 列了系统预置的 action/entity 常量（如 `action.system.home`、`entity.system.home`、`ohos.want.action.viewData`），匹配规则见 `explicit-implicit-want-mappings.md`。
 
 Deep Linking（URI 直跳，需在 AGC/`module.json5` 的 skills.uris 声明 scheme）与 App Linking（域名需与应用做归属校验，防仿冒）的区别：前者任意应用可抢注 scheme，后者要求域名验证，安全性更高，适合从网页/H5 拉起原生页。
+
+
+#### 2.4.1 与安卓进行对比
+
+在鸿蒙中，`context.startAbility` 的定位与安卓的 `Context.startActivity()` 高度相似，而它的核心参数 **Want** 正是类比安卓 **Intent** 的概念——两者都是"启动目标 + 携带数据"的信息载体，由系统根据其中的内容完成组件匹配与拉起<rsub ref="G.1.1">1</rsub><rsub ref="G.1.7">2</rsub>。下面为你做一次系统性的横向对比。
+
+#### 2.4.2 核心概念对照
+
+Want 是对象间信息传递的载体，用于应用组件间的信息传递。当 UIAbilityA 启动 UIAbilityB 并需要传入数据时，Want 就是这个数据载体：通过 `bundleName`、`abilityName` 指定启动目标，通过 `parameters` 等字段携带附加数据<rsub ref="G.1.1">1</rsub><rsub ref="E.2.1">3</rsub>。
+
+| 鸿蒙概念 | 安卓对应概念 | 说明 |
+|---|---|---|
+| UIAbility | Activity（大致对应） | 鸿蒙的应用组件，承载 UI 与生命周期 |
+| UIAbilityContext | Context | 组件运行的上下文环境 |
+| Want | Intent | 描述"启动谁、带什么数据"的载体 |
+| startAbility(want) | startActivity(intent) | 拉起一个 UIAbility<rsub ref="G.1.7">2</rsub> |
+| startAbilityForResult(want) | startActivityForResult / ActivityResultLauncher | 拉起并等待返回结果 |
+| module.json5 中的 skills 标签 | AndroidManifest.xml 中的 intent-filter | 声明组件能响应哪些隐式匹配 |
+| StartOptions | Intent 的 Flags / 启动选项 | 指定窗口模式、所在屏幕等启动选项<rsub ref="G.1.9">8</rsub> |
+
+#### 2.4.3 Want 字段与 Intent 的逐项对比
+
+| Want 字段 | Intent 对应 | 作用 |
+|---|---|---|
+| bundleName + abilityName | setPackage + setClassName（ComponentName） | 显式指定目标组件，唯一确定一个 Ability<rsub ref="E.2.1">3</rsub> |
+| moduleName | 无直接对应（类似包内模块） | 目标组件所在模块名<rsub ref="E.2.1">3</rsub> |
+| action | setAction | 要执行的通用操作，如查看、分享<rsub ref="E.2.1">3</rsub> |
+| entities | addCategory | 目标组件的类别信息，如浏览器、视频播放器<rsub ref="E.2.1">3</rsub> |
+| uri | setData | 统一资源标识符，配合 type 指明待处理数据<rsub ref="E.2.1">3</rsub> |
+| type | setType | MIME 类型，如 image/*<rsub ref="E.2.1">3</rsub> |
+| parameters | putExtra（Bundle） | 自定义键值对数据，支持字符串、数字、布尔、对象、数组等<rsub ref="E.2.1">3</rsub> |
+| flags | setFlags | 处理 Want 的方式，如临时授予 URI 读取权限<rsub ref="E.2.1">3</rsub> |
+| deviceId | 无直接对应 | 鸿蒙分布式特性，指定跨设备拉起目标<rsub ref="E.2.1">3</rsub> |
+
+#### 2.4.4 显式 Want 与隐式 Want：和安卓如出一辙
+
+鸿蒙同样区分两种匹配方式，机制与安卓的显式/隐式 Intent 完全同构<rsub ref="H.2.1">4</rsub><rsub ref="H.2.2">5</rsub>：
+
+| 匹配方式 | 鸿蒙 | 安卓 |
+|---|---|---|
+| 显式 | Want 中同时指定 bundleName 与 abilityName，直接匹配目标组件<rsub ref="H.2.1">4</rsub> | Intent 通过 setComponent 显式指定目标 |
+| 隐式 | 不指定 abilityName，通过 action、entities、uri、type 与目标组件在 module.json5 中声明的 skills 匹配；当多个应用匹配时由用户选择<rsub ref="H.2.2">5</rsub> | Intent 通过 action + category + data 与 intent-filter 匹配 |
+
+```mermaid
+flowchart TD
+    A[构造Want对象] --> B{是否指定bundleName与abilityName}
+    B -->|是| C[显式Want]
+    B -->|否| D[隐式Want]
+    C --> E[系统直接拉起指定UIAbility]
+    D --> F[系统匹配skills声明的action和uri等]
+    F --> G{匹配到几个应用}
+    G -->|唯一| E
+    G -->|多个| H[用户选择后拉起]
+```
+
+#### 2.4.5 代码示例
+
+显式 Want 启动本应用内的目标 UIAbility（在 UIAbility 中调用）：
+
+```typescript
+import { UIAbility, Want } from '@kit.AbilityKit';
+import { window } from '@kit.ArkUI';
+import { BusinessError } from '@kit.BasicServicesKit';
+
+export default class EntryAbility extends UIAbility {
+  onWindowStageCreate(windowStage: window.WindowStage): void {
+    // 显式Want：bundleName + abilityName 唯一确定目标组件
+    let want: Want = {
+      deviceId: '', // 为空表示本设备
+      bundleName: 'com.example.myapplication',
+      abilityName: 'FuncAbility',
+      moduleName: 'entry', // 非必选
+      parameters: { // 类比安卓的 putExtra
+        keyForString: 'str',
+        keyForInt: 100
+      }
+    };
+
+    this.context.startAbility(want, (err: BusinessError) => {
+      if (err.code) {
+        console.error(`Failed to startAbility. Code: ${err.code}, message: ${err.message}`);
+      }
+    });
+  }
+}
+```
+
+隐式 Want 打开链接（类比安卓隐式 Intent 打开网页）：
+
+```typescript
+import { common, Want } from '@kit.AbilityKit';
+import { BusinessError } from '@kit.BasicServicesKit';
+
+@Entry
+@Component
+struct Index {
+  // 在UI组件中获取上下文
+  private context = this.getUIContext().getHostContext() as common.UIAbilityContext;
+
+  build() {
+    Button('打开链接')
+      .onClick(() => {
+        // 隐式Want：不指定abilityName，通过action和uri匹配
+        let want: Want = {
+          action: 'ohos.want.action.viewData',
+          uri: 'https://www.example.com'
+        };
+        this.context.startAbility(want)
+          .then(() => {
+            console.info('startAbility succeed');
+          })
+          .catch((err: BusinessError) => {
+            console.error(`startAbility failed, code is ${err.code}, message is ${err.message}`);
+          });
+      })
+  }
+}
+```
+
+目标组件若要响应隐式 Want，需要在 `module.json5` 中声明 skills 标签（类比安卓的 intent-filter）：
+
+```json
+{
+  "abilities": [
+    {
+      "name": "FuncAbility",
+      "skills": [
+        {
+          "entities": ["entity.system.browsable"],
+          "actions": ["ohos.want.action.viewData"],
+          "uris": [
+            {
+              "scheme": "https",
+              "host": "www.example.com"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### 2.4.6 两个需要注意的差异点
+
+1. **startAbility 打开的不是"页面"，而是 UIAbility**。这是安卓开发者最容易混淆的地方：安卓中 Activity 约等于一个页面；而鸿蒙中一个 UIAbility 内部通过 Navigation 或 router 管理多个页面，页面级跳转应使用路由能力，`startAbility` 是组件级（应用级）的启动，粒度更粗。
+
+2. **跨应用拉起的策略变化**：从 API 12 开始，已不再推荐三方应用使用显式 Want 方式拉起其他应用，推荐通过应用链接（App Linking / Deep Linking）实现，其底层同样是把链接放入 Want 后调用 startAbility 进行隐式匹配。应用内启动自己的 UIAbility 则不受此限制。
+
+总结一句：**Want ≈ Intent，startAbility ≈ startActivity，skills ≈ intent-filter**，理解了这三组对应关系，安卓的组件启动经验基本可以平移到鸿蒙开发中，只需额外留意 UIAbility 与页面粒度的差异，以及跨应用跳转时优先使用应用链接的规范。
+内容由 AI 生成，仅供参考
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ### 2.5 页面导航：Router 与 Navigation
 
