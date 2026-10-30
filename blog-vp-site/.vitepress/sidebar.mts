@@ -102,5 +102,13 @@ export const sidebar: DefaultTheme.Sidebar = {
         { text: "12 · UI·调试·跨平台导出", link: "/godot/12-ui-debug-export" },
       ],
     },
+    {
+      text: "鸿蒙开发",
+      collapsed: false,
+      items: [
+        { text: "arkts 入门", link: "/harmonyOS/learn-arkts" },
+        { text: "arkui 入门", link: "/harmonyOS/learn-arkui" },
+      ],
+    },
   ],
 };
