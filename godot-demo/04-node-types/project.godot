@@ -1,0 +1,22 @@
+; Engine configuration file.
+; 第 04 章 demo 项目入口
+
+config_version=5
+
+[application]
+
+config/name="04 Node Types"
+config/description="第 04 章 demo：把所有重要节点类型各挂一个并跑起来——Sprite2D / AnimatedSprite2D / Polygon2D / Line2D / Label / Timer / AudioStreamPlayer / Tween 同台。"
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.3", "Forward Plus")
+config/icon="res://icon.svg"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
+environment/defaults/default_clear_color=Color(0.102, 0.102, 0.102, 1)

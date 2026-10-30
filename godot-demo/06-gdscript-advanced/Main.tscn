@@ -1,0 +1,88 @@
+[gd_scene load_steps=11 format=3]
+
+[ext_resource type="Script" path="res://scripts/Main.gd" id="1_main"]
+[ext_resource type="Texture2D" path="res://icon.svg" id="2_icon"]
+[ext_resource type="Script" path="res://scripts/Player.gd" id="3_player"]
+[ext_resource type="Script" path="res://scripts/HealthBar.gd" id="4_hp"]
+[ext_resource type="Script" path="res://scripts/GameOverLabel.gd" id="5_go"]
+[ext_resource type="Script" path="res://scripts/ScoreLabel.gd" id="6_score"]
+[ext_resource type="Script" path="res://scripts/PauseLabel.gd" id="7_pause"]
+
+[sub_resource type="RectangleShape2D" id="Rect_shape"]
+size = Vector2(100, 600)
+
+[sub_resource type="RectangleShape2D" id="Rect_player"]
+size = Vector2(60, 60)
+
+[sub_resource type="RectangleShape2D" id="Rect_damage"]
+size = Vector2(80, 600)
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_main")
+
+[node name="DamageZone" type="Area2D" parent="."]
+position = Vector2(1100, 360)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="DamageZone"]
+shape = SubResource("Rect_damage")
+
+[node name="Sprite" type="Sprite2D" parent="DamageZone"]
+modulate = Color(1, 0.3, 0.3, 0.6)
+position = Vector2(0, 0)
+scale = Vector2(0.625, 3.75)
+texture = ExtResource("2_icon")
+
+[node name="Wall" type="StaticBody2D" parent="."]
+position = Vector2(640, 680)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Wall"]
+shape = SubResource("Rect_shape")
+
+[node name="Player" type="CharacterBody2D" parent="."]
+position = Vector2(640, 600)
+script = ExtResource("3_player")
+
+[node name="Sprite" type="Sprite2D" parent="Player"]
+texture = ExtResource("2_icon")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Player"]
+shape = SubResource("Rect_player")
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="HealthBar" type="ProgressBar" parent="UI"]
+offset_left = 32.0
+offset_top = 32.0
+offset_right = 432.0
+offset_bottom = 56.0
+max_value = 100.0
+show_percentage = false
+script = ExtResource("4_hp")
+
+[node name="ScoreLabel" type="Label" parent="UI"]
+offset_left = 32.0
+offset_top = 64.0
+offset_right = 432.0
+offset_bottom = 96.0
+text = "Score: 0"
+script = ExtResource("6_score")
+
+[node name="GameOverLabel" type="Label" parent="UI"]
+offset_left = 400.0
+offset_top = 320.0
+offset_right = 880.0
+offset_bottom = 400.0
+theme_override_font_sizes/font_size = 36
+horizontal_alignment = 1
+text = "GAME OVER — 按 R 回菜单"
+script = ExtResource("5_go")
+
+[node name="PauseLabel" type="Label" parent="UI"]
+offset_left = 480.0
+offset_top = 320.0
+offset_right = 800.0
+offset_bottom = 360.0
+theme_override_font_sizes/font_size = 32
+horizontal_alignment = 1
+text = "PAUSED — 按 P 继续"
+script = ExtResource("7_pause")

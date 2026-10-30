@@ -1,0 +1,22 @@
+; Engine configuration file.
+; 第 03 章 demo 项目入口
+
+config_version=5
+
+[application]
+
+config/name="03 2D vs 3D"
+config/description="第 03 章 demo：同一窗口内上半屏显示 2D 移动方块，下半屏显示 3D 旋转立方体。CanvasLayer 隔离 2D/3D 渲染。"
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.3", "Forward Plus")
+config/icon="res://icon.svg"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
+environment/defaults/default_clear_color=Color(0.102, 0.102, 0.102, 1)

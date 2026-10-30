@@ -1,0 +1,13 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://World2D.tscn" id="2_2d"]
+[ext_resource type="PackedScene" path="res://World3D.tscn" id="3_3d"]
+
+; 根节点选 Node3D：3D 子场景作为主视觉，2D 通过嵌入的 CanvasLayer 隔离到上半屏
+[node name="Main" type="Node3D"]
+
+; 3D 子场景实例化：负责下半屏
+[node name="World3D" parent="." instance=ExtResource("3_3d")]
+
+; 2D 子场景实例化：World2D.tscn 根节点就是 CanvasLayer，会把 2D 内容隔离到自己的画布
+[node name="World2D" parent="." instance=ExtResource("2_2d")]

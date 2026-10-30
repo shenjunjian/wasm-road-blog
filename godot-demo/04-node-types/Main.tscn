@@ -1,0 +1,47 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/Main.gd" id="1_main"]
+[ext_resource type="Texture2D" path="res://icon.svg" id="2_icon"]
+[ext_resource type="SpriteFrames" path="res://spinner.tres" id="3_spin"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_main")
+
+[node name="Sprite2D_Static" type="Sprite2D" parent="."]
+position = Vector2(200, 200)
+modulate = Color(0.4, 1.0, 0.5, 1)
+texture = ExtResource("2_icon")
+
+[node name="AnimatedSprite2D_Spinner" type="AnimatedSprite2D" parent="."]
+position = Vector2(400, 200)
+sprite_frames = ExtResource("3_spin")
+
+[node name="Polygon2D_Triangle" type="Polygon2D" parent="."]
+position = Vector2(600, 200)
+polygon = PackedVector2Array(-40, 40, 40, 40, 0, -50)
+color = Color(1, 0.7, 0.2, 1)
+
+[node name="Line2D_Trail" type="Line2D" parent="."]
+points = PackedVector2Array(100, 350, 200, 300, 300, 350)
+width = 4.0
+default_color = Color(1, 1, 1, 1)
+
+[node name="Label_Text" type="Label" parent="."]
+offset_left = 800.0
+offset_top = 180.0
+offset_right = 1080.0
+offset_bottom = 220.0
+text = "Label 节点 (Control)"
+
+[node name="Timer_Tick" type="Timer" parent="."]
+wait_time = 1.0
+autostart = true
+
+[node name="AudioStreamPlayer_Beep" type="AudioStreamPlayer" parent="."]
+
+[node name="Tween_Bouncer" type="Node" parent="."]
+
+[node name="Polygon2D_Bouncer" type="Polygon2D" parent="Tween_Bouncer"]
+position = Vector2(200, 500)
+polygon = PackedVector2Array(-30, 0, 30, 0, 0, -50)
+color = Color(0.5, 0.5, 1, 1)

@@ -1,0 +1,37 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Main.gd" id="1_main"]
+
+[node name="Main" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_main")
+
+[node name="TitleLabel" type="Label" parent="."]
+layout_mode = 0
+offset_left = 32.0
+offset_top = 24.0
+offset_right = 1248.0
+offset_bottom = 80.0
+theme_override_font_sizes/font_size = 32
+text = "GDScript 语法速查 — 按 1~8 切换演示"
+
+[node name="HintLabel" type="Label" parent="."]
+layout_mode = 0
+offset_left = 32.0
+offset_top = 96.0
+offset_right = 1248.0
+offset_bottom = 144.0
+text = "1.变量 2.函数 3.控制流 4.Array 5.Dict 6.字符串 7.运算符 8.Lambda"
+
+[node name="OutputLabel" type="RichTextLabel" parent="."]
+layout_mode = 0
+offset_left = 32.0
+offset_top = 168.0
+offset_right = 1248.0
+offset_bottom = 696.0
+bbcode_enabled = true
+fit_content = true
+scroll_following = true
