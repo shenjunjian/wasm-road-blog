@@ -2700,16 +2700,16 @@ gattClient.close();
 flowchart TD
     A[开始选择蓝牙通信方式] --> B{是否传输音频}
     B -->|是| C[使用 A2DP 音频协议模块]
-    B -->|否| D{对端是否为低功耗设备<br/>如穿戴/传感器]
+    B -->|否| D[对端是否为低功耗设备<br/>如穿戴/传感器]
     D -->|是| E[使用 BLE GATT 客户端或服务端]
-    D -->|否| F{是否为传统串口设备<br/>如打印机/OBD]
+    D -->|否| F[是否为传统串口设备<br/>如打印机/OBD]
     F -->|是| G[使用经典蓝牙 SPP 套接字]
-    F -->|否| H{是否只需被周围设备发现]
+    F -->|否| H[是否只需被周围设备发现]
     H -->|是| I[使用 BLE 广播]
     H -->|否| J[使用 BLE 扫描主动发现设备]
 ```
 
-### 二、经典蓝牙 SPP（socket 模块）
+#### 7.2.2 经典蓝牙 SPP（socket 模块）
 
 **原理与适用场景**：SPP 模拟传统 RS232 串行通信，为上层应用提供简单可靠的双向数据流<rsub ref="E.3.1">2</rsub>。它基于套接字模型，服务端先监听、客户端再连接，适合与只支持经典蓝牙的硬件对接、或需要持续流式传输较大数据量的场景。
 
@@ -2800,7 +2800,7 @@ function connectSppServer(deviceId: string): void {
 - 若需要感知传输过程中的异常断连，建议使用 API 18+ 的 `sppWriteAsync`/`sppReadAsync` 替代同步写和事件订阅读，同一连接两者不可混用<rsub ref="G.5.2">5</rsub>。
 - RFCOMM 链路接收数据超过 1024 字节时会自动分多次接收，每次接收范围为 [1, 1024] 字节<rsub ref="G.5.1">4</rsub>。
 
-### 三、GATT 服务端与客户端（ble 模块）
+#### 7.2.3 GATT 服务端与客户端（ble 模块）
 
 **原理与适用场景**：GATT 采用"服务（Service）-特征值（Characteristic）"的层级模型，服务端注册服务供客户端发现和读写，是 BLE 最主流的通信方式。适合智能手环、体温计、血糖仪等低功耗、间歇性小数据量交互的设备。
 
@@ -2909,7 +2909,7 @@ gattClient.getServices((err: BusinessError, services: Array<ble.GattService>) =>
 
 `GattClientDevice` 提供与服务端连接和数据传输的方法，通过创建不同的实例可以管理多路 GATT 连接<rsub ref="G.2.6">9</rsub>。注意：`writeCharacteristicValue` 等接口要求前序非监听类接口（如 `getServices`、`setCharacteristicChangeNotification`）的回调完成后才能调用，否则会报 2900099 错误<rsub ref="G.4.4">15</rsub>。
 
-### 四、BLE 广播与扫描（ble 模块）
+#### 7.2.4 BLE 广播与扫描（ble 模块）
 
 **原理与适用场景**：广播是单向的"喊话"，用于让周围设备发现自己（常配合 GATT 服务端作为被连接方）；扫描是发现周边 BLE 设备（常配合 GATT 客户端作为连接发起方）。两者都不建立连接，功耗低。
 
@@ -2993,7 +2993,7 @@ function startScan(): void {
 
 扫描结果通过 `ble.on('BLEDeviceFind')` 的回调获取，`startBLEScan` 只支持单路扫描，下一次调用前需先调用 `ble.stopBLEScan()` 停止上一次的扫描流程；若需要多路扫描，可使用 API 15+ 的 `BleScanner`<rsub ref="G.4.9">12</rsub>。当应用不再需要扫描时，需主动调用 `ble.stopBLEScan()` 停止，调用后不再收到扫描结果上报<rsub ref="G.4.8">13</rsub>。
 
-### 五、资源清理（对应你引用的最后一句）
+#### 7.2.5 资源清理（对应你引用的最后一句）
 
 用完及时释放是正确习惯，但方法名需注意，完整的清理清单如下：
 
@@ -3020,7 +3020,7 @@ socket.sppCloseClientSocket(clientSocketId);
 socket.sppCloseServerSocket(serverSocketId);
 ```
 
-### 六、推荐使用哪种方式
+#### 7.2.6 推荐使用哪种方式
 
 **优先推荐 BLE GATT**，理由如下：
 

@@ -112,7 +112,17 @@ export default withMermaid({
     flowchart: {
       curve: 'basis',
       padding: 16,
+      // 宽图保持原始字号，由容器横向滚动，避免整体缩放到不可读
+      useMaxWidth: false,
     },
+    sequence: { useMaxWidth: false },
+    class: { useMaxWidth: false },
+    state: { useMaxWidth: false },
+    er: { useMaxWidth: false },
+    gantt: { useMaxWidth: false },
+    journey: { useMaxWidth: false },
+    mindmap: { useMaxWidth: false },
+    timeline: { useMaxWidth: false },
     themeVariables: {
       fontFamily: 'var(--vp-font-family-base)',
       fontSize: '14px',
