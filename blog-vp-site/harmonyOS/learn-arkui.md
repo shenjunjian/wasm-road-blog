@@ -3046,49 +3046,143 @@ CameraKit 是「组装流水线」：`CameraManager → CameraDevice(CameraInput
 ```ts
 import { camera } from '@kit.CameraKit';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { common } from '@kit.AbilityKit';
+import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
 
-// 预览面：XComponent 提供 surfaceId
+// module.json5 需声明 ohos.permission.CAMERA（user_grant）
 @Entry
 @ComponentV2
 struct CamPage {
   ctl: XComponentController = new XComponentController();
-  surfaceId: string = '';
+  private session?: camera.PhotoSession;
+  private input?: camera.CameraInput;
+  private preview?: camera.PreviewOutput;
+  private photoOutput?: camera.PhotoOutput;
+  private started: boolean = false;
+
   build() {
-    XComponent({ id: 'cam', type: XComponentType.SURFACE, libraryname: '' })
-      .onLoad(() => { this.surfaceId = this.ctl.getXComponentSurfaceId(); /* 此处启动相机 */ })
-      .width('100%').height('100%')
+    Stack({ alignContent: Alignment.Bottom }) {
+      XComponent({ id: 'cam', type: XComponentType.SURFACE, controller: this.ctl })
+        .onLoad(() => {
+          this.startCamera().catch((e: BusinessError) => {
+            console.error(`startCamera failed: ${e.code} ${e.message}`);
+          });
+        })
+        .width('100%').height('100%')
+
+      Button('拍照')
+        .margin({ bottom: 36 })
+        .onClick(() => {
+          this.capture().catch((e: BusinessError) => {
+            console.error(`capture failed: ${e.code} ${e.message}`);
+          });
+        })
+    }
+    .width('100%').height('100%')
+  }
+
+  aboutToDisappear(): void {
+    this.releaseCamera().catch((e: BusinessError) => {
+      console.error(`releaseCamera failed: ${e.code} ${e.message}`);
+    });
+  }
+
+  private async startCamera(): Promise<void> {
+    if (this.session) return;
+
+    const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const permissions: Permissions[] = ['ohos.permission.CAMERA'];
+    const result = await abilityAccessCtrl.createAtManager().requestPermissionsFromUser(ctx, permissions);
+    if (!result.authResults.every((r: number) => r === 0)) {
+      throw new Error('CAMERA permission denied');
+    }
+
+    const surfaceId = this.ctl.getXComponentSurfaceId();
+    if (!surfaceId) {
+      throw new Error('XComponent surface is not ready');
+    }
+
+    const mgr = camera.getCameraManager(ctx);
+    const cameras: Array<camera.CameraDevice> = mgr.getSupportedCameras();
+    if (cameras.length === 0) {
+      throw new Error('no camera device');
+    }
+    const device = cameras[0];
+    const cap = mgr.getSupportedOutputCapability(device, camera.SceneMode.NORMAL_PHOTO);
+    if (cap.previewProfiles.length === 0 || cap.photoProfiles.length === 0) {
+      throw new Error('camera profile unavailable');
+    }
+
+    try {
+      const input = mgr.createCameraInput(device);
+      this.input = input;
+      await input.open();
+
+      const preview = mgr.createPreviewOutput(cap.previewProfiles[0], surfaceId);
+      this.preview = preview;
+      const photo = mgr.createPhotoOutput(cap.photoProfiles[0]);
+      this.photoOutput = photo;
+
+      const session = mgr.createSession(camera.SceneMode.NORMAL_PHOTO) as camera.PhotoSession;
+      this.session = session;
+      session.beginConfig();
+      session.addInput(input);
+      session.addOutput(preview);
+      session.addOutput(photo);
+      await session.commitConfig();
+      session.on('error', (e: BusinessError) => {
+        console.error(`camera session error: ${e.code} ${e.message}`);
+      });
+
+      photo.on('photoAvailable', (err: BusinessError, p: camera.Photo) => {
+        if (err) {
+          console.error(`photoAvailable failed: ${err.code} ${err.message}`);
+          return;
+        }
+        // p.image 是 image.Image，可在这里编码/保存
+      });
+      await session.start();
+      this.started = true;
+    } catch (e) {
+      await this.releaseCamera();
+      throw e;
+    }
+  }
+
+  private async capture(): Promise<void> {
+    const output = this.photoOutput;
+    if (!this.started || !output) return;
+    const settings: camera.PhotoCaptureSetting = {
+      quality: camera.QualityLevel.QUALITY_LEVEL_HIGH,
+      rotation: camera.ImageRotation.ROTATION_0, mirror: false
+    };
+    await output.capture(settings);
+  }
+
+  private async releaseCamera(): Promise<void> {
+    const session = this.session;
+    const input = this.input;
+    const preview = this.preview;
+    const photo = this.photoOutput;
+    const wasStarted = this.started;
+
+    this.started = false;
+    this.session = undefined;
+    this.input = undefined;
+    this.preview = undefined;
+    this.photoOutput = undefined;
+
+    if (wasStarted) {
+      await session?.stop();
+    }
+    await input?.close();
+    await preview?.release();
+    await photo?.release();
+    await session?.release();
   }
 }
-
-async function start(ctx: common.BaseContext, surfaceId: string) {
-  const mgr = camera.getCameraManager(ctx);
-  const cameras: Array<camera.CameraDevice> = mgr.getSupportedCameras();   // cameraId/cameraPosition/cameraType/connectionType
-  const cap = mgr.getSupportedOutputCapability(cameras[0], camera.SceneMode.NORMAL_PHOTO);
-  const input = mgr.createCameraInput(cameras[0]);
-  await input.open();
-
-  const preview = mgr.createPreviewOutput(cap.previewProfiles[0], surfaceId);
-  const photo = mgr.createPhotoOutput(cap.photoProfiles[0]);
-  const session = mgr.createSession(camera.SceneMode.NORMAL_PHOTO) as camera.PhotoSession;
-  session.beginConfig();
-  session.addInput(input);
-  session.addOutput(preview);
-  session.addOutput(photo);
-  session.commitConfig();
-  session.on('error', (e: BusinessError) => { });
-  await session.start();
-
-  // 拍照
-  photo.on('photoAvailable', (errCode: BusinessError, photo: camera.Photo): void => { /* 从 photo.image 取 buffer 落地保存 */ });
-  const settings: camera.PhotoCaptureSetting = {
-    quality: camera.QualityLevel.QUALITY_LEVEL_HIGH,
-    rotation: camera.ImageRotation.ROTATION_0, mirror: false
-  };
-  await photo.capture(settings);
-  // 释放：session.stop() → input.close() → preview.release() → photo.release() → session.release()
-}
 ```
+
+`CAMERA` 是 `user_grant` 权限，除运行时申请外，还要在 `module.json5` 的 `requestPermissions` 中声明。
 
 **免权限/免开发的两条捷径**：
 - `cameraPicker`（@kit.CameraKit）：拉起系统相机拍完把结果 URI 给你，**不需要 CAMERA 权限**，可配 `PickerProfile`（`saveUri` 不填则默认存媒体库）。
