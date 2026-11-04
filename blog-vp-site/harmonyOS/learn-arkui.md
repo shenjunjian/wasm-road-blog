@@ -36,7 +36,7 @@ HarmonyOS 的应用能力被切成一组以 `@kit.*` 结尾的聚合模块，`im
 
 - 一、全景：ArkUI 是什么、开发范式与 ArkTS 语法（含 UI 更新机制概述）
 - 二、Stage 模型、模块配置、页面导航与 Intent 意图框架
-- 三、状态管理与 UI 更新机制（V1 / V2 全量装饰器）
+- 三、状态管理与 UI 更新机制（V2 装饰器）
 - 四、组件清单与自定义组件
 - 五、布局体系
 - 六、消息事件、手势与动画
@@ -103,7 +103,7 @@ function add(a: number, b: number): number { return a + b; }
 
 其他约束值得记住：
 - **仅支持在 `.ets` 中使用的语法**：`struct`、`build()`、装饰器。`.ts` 文件里写不了组件。
-- `struct` 不是 `class`：`@Component struct` 不能用 `new` 实例化，也不能有 constructor（用成员默认值初始化）。
+- `struct` 不是 `class`：`@ComponentV2 struct` 不能用 `new` 实例化，也不能有 constructor（用成员默认值初始化）。
 - 代码规范单列一份文档（`quick-start/arkts-coding-style-guide.md`），并把「高性能写法」单列（`arkts-high-performance-programming.md`：对象数组避免频繁增删、优先值类型、避免装箱类型等）。
 
 > 对前端的实际体感：**把它当成「类型检查更严的 TS + 一套 Vue 式模板语法」即可**。真正需要改习惯的是「不能随手挂属性」「必须给每个变量类型」。
@@ -113,9 +113,9 @@ function add(a: number, b: number): number { return a + b; }
 ```ts
 // entry/src/main/ets/pages/Index.ets
 @Entry          // 页面入口：该组件是路由可指向的一个页面，一个页面只允许一个 @Entry
-@Component      // 声明这是一个自定义组件
+@ComponentV2    // 声明这是一个 V2 自定义组件
 struct Index {  // UI 描述写在 struct 里，不是 class
-  @State message: string = 'Hello World';   // 状态变量：变了会驱动 UI 刷新
+  @Local message: string = 'Hello World';   // 组件内部状态：变了会驱动 UI 刷新
 
   build() {                                  // build() 描述 UI 结构，只能有一个根节点
     Column() {                               // 容器组件，参数()，子组件用 {} 包裹
@@ -166,8 +166,8 @@ ArkUI 的更新不是「重新执行 render 函数 + 虚拟 DOM diff」，官方
 
 对日常开发的可操作结论（详见状态管理章）：
 - 只有**被装饰器装饰的变量**改变才刷新 UI；普通成员变量改了不刷新。
-- V1 装饰器只能观察**第一层**属性变化，嵌套对象要 `@Observed + @ObjectLink`，V2 的 `@ObservedV2 + @Trace` 支持深度观测。
-- 数组「整体赋值」与「push/splice」都能触发 `@State` 更新；但 `ForEach` 靠 key 判断是否复用，key 不变则子组件不会收到新数据（最常见的坑）。
+- V2 用 `@ObservedV2 + @Trace` 支持类对象的深度观测；被 `@Trace` 标记的属性变化会触发绑定它的 UI 按需刷新。
+- 数组「整体赋值」与「push/splice」都能触发 `@Local` 更新；但 `ForEach` 靠 key 判断是否复用，key 不变则子组件不会收到新数据（最常见的坑）。
 
 ### 1.5 工程结构与文件类型
 
@@ -604,7 +604,7 @@ import { common, Want } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 
 @Entry
-@Component
+@ComponentV2
 struct Index {
   // 在UI组件中获取上下文
   private context = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -700,9 +700,9 @@ const params = this.getUIContext().getRouter().getParams() as Record<string, num
 
 // —— Navigation（推荐）——
 @Entry
-@Component
+@ComponentV2
 struct Home {
-  pageStack: NavPathStack = new NavPathStack();     // 路由栈，与 Navigation 一一对应，不可复用
+  @Provider pageStack: NavPathStack = new NavPathStack();   // 路由栈，与 Navigation 一一对应，不可复用
 
   @Builder pageMap(name: string) {                  // 名字 → NavDestination 的映射
     if (name === 'detail') {
@@ -725,8 +725,10 @@ struct Home {
   }
 }
 
-@Component
+@ComponentV2
 struct DetailPage {
+  @Consumer pageStack: NavPathStack = new NavPathStack();    // 跨层级取得导航栈
+
   build() {
     NavDestination() {                               // 每个子页面的根容器
       Column() {
@@ -743,7 +745,7 @@ struct DetailPage {
 ```
 
 要点：
-- `NavPathStack` 是导航栈：`pushPath` / `pushDestination`（后者传 builder 而非注册名）/ `pop` / `popToName` / `replacePath` / `clear`；也可 `AppStorage.setOrCreate<NavPathStack>('stack', this.navStack)` 让子组件用 `@StorageLink` 拿到栈。
+- `NavPathStack` 是导航栈：`pushPath` / `pushDestination`（后者传 builder 而非注册名）/ `pop` / `popToName` / `replacePath` / `clear`；子页面可用 `@Provider` / `@Consumer` 跨层级取得同一个栈。
 - NavDestination 内置标题栏、菜单栏、工具栏、内容区四段；支持 `.customTitleBar()`。
 - **分栏模式**：文档明确「Navigation 容器宽度 ≥ 600vp 时建议使用分栏模式」，此时左侧 NavBar、右侧子页，路由只替换右侧——这是平板/2in1 自适应的核心机制（`arkts-navigation-split-mode.md`）。
 - 跨包/跨模块路由通过 `routeMap` 注册表（`arkts-navigation-cross-package.md`）。
@@ -825,7 +827,7 @@ async function run() {
 
 ---
 
-## 三、状态管理与 UI 更新机制（V1 / V2）
+## 三、状态管理与 UI 更新机制（V2）
 
 > 面向有 TypeScript / Vue / React 经验的开发者。内容取自 OpenHarmony / HarmonyOS 官方开发文档（ArkUI 指南与 API 参考、华为 Kit 指南），每个示例后注明来源文件；官方文档未覆盖的机制，本文标注「文档未明确」。
 
@@ -842,182 +844,121 @@ ArkUI 是数据驱动的声明式 UI：**只有被装饰器装饰的变量（状
 
 约束：状态管理**仅支持 UI 主线程**，不能在子线程、Worker、TaskPool 中使用。
 
-### 3.2 V1 装饰器全家福
+### 3.2 V2 装饰器全家福
 
-依据 overview：**仅 `@Observed/@ObjectLink` 可观察嵌套场景，其他状态变量只能观察第一层**。
+V2 的状态管理按「组件内状态、父子输入输出、跨层级共享、类对象深度观测、派生与监听」组织。新工程直接用 `@ComponentV2` 搭配下表装饰器；同一个 struct 内不要混用两套状态管理范式。
 
-| 装饰器 | 作用 | 数据流向 | 双向 | 观察层级 | 典型场景 |
-| --- | --- | --- | --- | --- | --- |
-| `@Entry` | 页面入口；根节点必须是容器组件，`ForEach` 禁作根 | — | — | — | 页面顶部 |
-| `@Component` | 声明自定义组件（搭配 V1 状态变量） | — | — | — | struct |
-| `@CustomDialog` | 自定义弹窗组件 | 父子 | — | — | 弹窗（V2 改 `openCustomDialog`） |
-| `@State` | 组件自身状态，可作子组件单向/双向同步的数据源 | 组件内→子 | 源 | 第一层 | 计数、表单 |
-| `@Prop` | 单向同步，本地可改但**不回传** | 父→子 | ✗ | 第一层（复杂类型深拷贝） | 只读配置 |
-| `@Link` | 双向同步，禁止本地初始化 | 父↔子 | ✓ | 第一层 | 受控子组件 |
-| `@Provide`/`@Consume` | 跨层级同步，按 key/alias 绑定，不走参数 | 祖先↔后代 | ✓ | 第一层 | 深层状态、主题 |
-| `@Observed` | 装饰 class，单独使用无作用，须联用 `@ObjectLink`/`@Prop` | — | — | 使嵌套可观察 | 数组项/嵌套对象 |
-| `@ObjectLink` | 接收 `@Observed` 实例，与源双向；禁止整体赋值 | 父↔子 | ✓ | **嵌套** | 列表项组件 |
-| `@Watch('cb')` | 监听状态变量变化，同步执行 | 组件内 | — | 变量+第一层 | 变化后副作用 |
-| `@Track` | class 属性级更新；未加的属性不能在 UI 用 | 组件内 | — | 属性级，无深度 | 大对象局部绑定 |
-| `@Require` | 变量必须由外部传入初始化 | 父→子 | — | — | 必填参数 |
-| `@Reusable` | V1 组件复用，回收进父组件缓存池 | — | — | — | 长列表项 |
-| `@Builder`/`@BuilderParam` | 封装 UI 片段 / 将 UI 片段作参数传入 | 父→子 | — | 见 §6.5 | 插槽、局部复用 |
-| `@Styles`/`@Extend` | 复用公共样式 / 扩展指定系统组件 | — | — | — | 样式收敛 |
-| `stateStyles` | 多态样式（focused/normal/pressed/disabled/clicked/selected） | — | — | — | 按压/选中态 |
-| `@StorageProp`/`@StorageLink` | 与 AppStorage 某 key 单向/双向同步 | 全局↔组件 | 单向/双向 | 第一层 | 跨页面、跨 Ability |
-| `@LocalStorageProp`/`@LocalStorageLink` | 与 LocalStorage 某 key 单向/双向同步 | 页面级↔组件 | 单向/双向 | 第一层 | 页面内共享 |
-| `@ObservedV2`/`@Trace` | V2：class 可观察 + 属性深度观测 | — | — | **深度** | 见 §4 |
+| 装饰器 | 作用 | 数据流向 | 观察层级 | 典型场景 |
+| --- | --- | --- | --- | --- |
+| `@Entry` | 页面入口；根节点必须是容器组件，`ForEach` 禁作根 | — | — | 页面顶部 |
+| `@ComponentV2` | 声明 V2 自定义组件 | — | — | struct |
+| `@Local` | 组件私有状态，只能本地初始化 | 组件内 | 对象本身；类属性需 `@Trace` | 计数、表单 |
+| `@Param` | 父组件传入的只读参数 | 父→子 | 对象本身；类属性需 `@Trace` | 子组件输入 |
+| `@Once` | 搭配 `@Param`，只在初始化时接收一次父值 | 父→子（一次） | 同上 | 可本地改的初始值 |
+| `@Event` | 子组件回调父组件 | 子→父 | — | 组件输出 |
+| `@Provider`/`@Consumer` | 跨层级共享，按变量名/alias 匹配 | 祖先↔后代 | 对象本身；类属性需 `@Trace` | 主题、深层状态 |
+| `@ObservedV2` | 声明 class 可被 V2 深度观察，本身不观察属性 | — | — | 数据模型 |
+| `@Trace` | 标记 `@ObservedV2` 类中需要观察的属性 | — | 属性级、支持嵌套 | 嵌套对象/列表项 |
+| `@Computed` | 由状态变量派生的计算属性 | 组件内 | 依赖变化时重算 | 格式化、汇总 |
+| `@Monitor` | 监听状态变量或属性路径变化 | 组件内 | 支持嵌套路径 | 副作用、联动 |
+| `@SyncMonitor` | 状态变量修改的同步监听 | 组件内 | 支持嵌套路径 | 需要同步读取新值 |
+| `@Require` | 参数/事件必须由外部传入 | 父→子 | — | 必填参数 |
+| `@ReusableV2` | V2 组件复用，进入全局复用池 | — | — | 长列表项 |
+| `@Builder`/`@BuilderParam` | 封装 UI 片段 / 将 UI 片段作参数传入 | 父→子 | — | 插槽、局部复用 |
+| `@Styles`/`@Extend` | 复用公共样式 / 扩展指定系统组件 | — | — | 样式收敛 |
+| `stateStyles` | 多态样式（focused/normal/pressed/disabled/clicked/selected） | — | — | 按压/选中态 |
+| `AppStorageV2`/`PersistenceV2` | 应用级共享 / 持久化 | 全局↔组件 | 类对象 + `@Trace` | 跨页面、落盘 |
+| `!!` | 双向绑定语法糖（API 12+） | 父↔子 | — | 受控组件 |
 
-`$$` 运算符（V1）「给系统组件提供 TS 变量的引用，使得 TS 变量和系统组件的内部状态保持同步」。
+### 3.3 组件内状态：`@Local`
 
-### 3.3 单向 vs 双向：四种同步语义
-
-#### 3.3.1 `@Prop`：本地可改但不回传，且会被父覆盖
-
-框架行为原文（`arkts-prop.md`）：「子组件 @Prop 更新时，更新仅停留在当前子组件，不会同步回父组件」；父数据源更新时，`@Prop`「将被来自父组件的数据源重置，所有 @Prop 装饰变量的本地修改将被父组件的更新覆盖」。
+`@Local` 是 V2 的组件私有状态：必须本地初始化，不能由父组件传参初始化；修改它驱动当前组件及绑定节点刷新。内建类型（Array/Map/Set/Date 等）可直接观察，class 内部属性则要 `@ObservedV2 + @Trace`。
 
 ```ts
-@Component
-struct Son {
-  @Prop message: string = 'Hi';
-  build() { Column() { Text(this.message) } }
-}
-
 @Entry
-@Component
-struct Father {
-  @State message: string = 'Hello';
+@ComponentV2
+struct Counter {
+  @Local count: number = 0;
+
   build() {
-    Column() {
-      Text(this.message)
-      Button(`father click`).onClick(() => { this.message += '*'; })
-      // 父组件@State装饰的message传给子组件的message
-      Son({ message: this.message })
-    }
+    Button(`count: ${this.count}`)
+      .onClick(() => { this.count++; })
   }
 }
 ```
-> 来源：`ui/state-management/state-management_arkts-prop.md`「框架行为」
 
-坑：`@Prop` 深拷贝时除基本类型/Map/Set/Date/Array 外会丢类型（`PixelMap`、`RegExp`）；应用进后台无法触发刷新，`@Prop` 无法从数据源更新，官方建议改用 `@Link`；不支持装饰 Function。
+### 3.4 父子同步：`@Param` / `@Once` / `@Event` / `!!`
 
-#### 3.3.2 `@Link`：双向，属性与整体赋值都回传
-
-```ts
-class GreenButtonState {
-  public width: number = 0;
-  constructor(width: number) { this.width = width; }
-}
-
-@Component
-struct GreenButton {
-  @Link greenButtonState: GreenButtonState;
-  build() {
-    Button('Green Button').width(this.greenButtonState.width).onClick(() => {
-      if (this.greenButtonState.width < 700) {
-        this.greenButtonState.width += 60;   // 属性变化同步回父组件
-      } else {
-        this.greenButtonState = new GreenButtonState(180); // 整体赋值同样同步
-      }
-    })
-  }
-}
-```
-> 来源：`ui/state-management/state-management_arkts-link.md`「简单类型和类对象类型的@Link」
-
-`@Link` 禁止本地初始化；只能观察对象本身及一层属性，嵌套需转 `@Observed`/`@ObjectLink`。
-
-#### 3.3.3 `@Observed` + `@ObjectLink`：V1 唯一能观察嵌套的组合
+- `@Param`：父→子单向同步，子组件内只读。可给本地默认值；没有本地默认值时，必须与 `@Require` 一起使用。
+- `@Once`：搭配 `@Param`，只在初始化时接收父值；之后允许本地修改，父组件后续更新不再覆盖。
+- `@Event`：子→父的回调。子组件调用它，由父组件决定如何修改状态。
+- `!!`：双向绑定语法糖，等价于同时传入值和一个写回回调。
 
 ```ts
-@Observed class Book { public name: string; constructor(n: string) { this.name = n; } }
-@Observed class Bag { public book: Book; constructor(b: Book) { this.book = b; } }
+@ComponentV2
+struct Stepper {
+  @Require @Param value: number;
+  @Event $value: (value: number) => void = () => {};
 
-@Component
-struct BookCard {
-  @ObjectLink book: Book;
   build() {
-    Column() {
-      Text(`BookCard: ${this.book.name}`)  // 可以观察到name的变化
-      Button('change book.name').onClick(() => { this.book.name = 'C++'; })
+    Row() {
+      Text(`${this.value}`)
+      Button('+').onClick(() => { this.$value(this.value + 1); })
     }
   }
 }
 
 @Entry
-@Component
+@ComponentV2
 struct Index {
-  @State bag: Bag = new Bag(new Book('JS'));
+  @Local count: number = 0;
+
   build() {
     Column() {
-      Text(`Index: ${this.bag.book.name}`) // 无法观察到name的变化
-      Button('change bag.book.name').onClick(() => { this.bag.book.name = 'TS'; })
-      BookCard({ book: this.bag.book })
+      Stepper({ value: this.count, $value: (value: number) => { this.count = value; } })
+      Stepper({ value: this.count!! })   // 等价写法
     }
   }
 }
 ```
-> 来源：`ui/state-management/state-management_arkts-observed-and-objectlink.md`「嵌套对象」
 
-文档结论：`@State` 感知外层 `Bag` 第一层变化，`@ObjectLink + @Observed` 感知内层 `Book` 属性变化。`@ObjectLink` **只读**：允许 `this.objLink.a = ...`，禁止 `this.objLink = ...`，赋值会打断同步链。API 19 起可接收无 `@Observed` 的复杂类型，但观察嵌套仍需 `@Observed` 实例或 `makeV1Observed()` 返回值。
+来源：`ui/state-management/state-management_arkts-new-param.md`、`ui/state-management/arkts-new-binding.md`。
 
-#### 3.3.4 `@Provide` / `@Consume`：跳过中间层
+### 3.5 跨层级共享：`@Provider` / `@Consumer`
+
+`@Provider` 把状态提供给后代，`@Consumer` 在后代中按变量名（或 alias）取用，双方保持同步。`@Consumer` 必须有本地默认值；`@Provider` 默认允许同名覆盖。
 
 ```ts
-@Component
-struct ToDoItem {
-  // 通过相同的属性名绑定其祖先组件ToDo内的@Provide装饰的变量
-  @Consume count: number;
+@ComponentV2
+struct ThemeText {
+  @Consumer color: ResourceColor = Color.Black;   // 本地默认值
+
   build() {
-    Column() {
-      Text(`count(${this.count})`)
-      Button(`count(${this.count}), count + 1`).onClick(() => this.count += 1)
-    }
+    Text('theme text').fontColor(this.color)
   }
 }
-@Component struct ToDoList { build() { Row() { ToDoItem(); ToDoItem() } } }
 
 @Entry
-@Component
-struct ToDo {
-  @Provide count: number = 0; // 由入口组件提供给其后代组件
+@ComponentV2
+struct Page {
+  @Provider color: ResourceColor = Color.Blue;
+
   build() {
     Column() {
-      Button(`count(${this.count}), count + 1`).onClick(() => this.count += 1)
-      ToDoDemo()
+      ThemeText()
+      Button('切换颜色').onClick(() => { this.color = Color.Red; })
     }
   }
 }
 ```
-> 来源：`ui/state-management/state-management_arkts-provide-and-consume.md`（中间层 `ToDoDemo` 省略，示例原文如此）
 
-框架行为：`@Provide` 以 Map 传给所有子组件，`@Consume` 按变量名/alias 查找并把自己注册给 `@Provide`，实现双向。key 必须为 string；API 20 起 `@Consume` 支持默认值；`@Provide` 支持 `allowOverride`。文档提醒：它「相当于把组件粘合在一起了，从组件独立角度考虑，应减少使用」。
+文档提醒：跨层级共享「相当于把组件粘合在一起了」，从组件独立性考虑应减少使用。
 
-### 3.4 状态管理 V2
+### 3.6 类对象深度观测：`@ObservedV2` + `@Trace`
 
-V1 局限（overview 原文）：用代理观察数据，「状态变量不能独立于 UI 存在，同一个数据被多个视图代理时，其中一个视图的更改不会通知其他视图更新」；只能感知第一层；改对象属性与数组元素存在冗余更新；装饰器配合限制多。V2 增强：状态变量独立于 UI、深度观测与深度监听（不影响观测性能）、属性级精准更新与数组最小化更新、组件输入输出明确。
+`@ObservedV2` 声明 class 可被 V2 深度观察，`@Trace` 标记具体属性；两者组合后，任意层级的属性变化都能精确驱动绑定它的 UI 刷新。`@ObservedV2` 本身不观察属性，只标注「这个类参与 V2 观察」。
 
-#### 3.4.1 V1→V2 能力对照（照抄 overview 表格结论）
-
-| V1 | V2 | 关键差异 |
-| --- | --- | --- |
-| `@Observed` | `@ObservedV2` | `@ObservedV2` 本身无观察能力，仅代表 class 可观察，需配 `@Trace` |
-| `@Track` | `@Trace` | V2 属性级精确跟踪 |
-| `@Component` | `@ComponentV2` | 分别搭配 V1 / V2 状态变量 |
-| `@State` | `@Local` / `@Param @Once` | `@Local` 不可外部初始化，`@State` 可以 |
-| `@Prop` | `@Param` | 复杂类型时 `@Prop` 深拷贝、`@Param` **引用** |
-| `@Link` | `@Param` + `@Event`（或 `!!`） | V2 由开发者显式实现双向 |
-| `@ObjectLink` | `@Param` | 直接兼容，`@Param` 无 `@Observed` 限制 |
-| `@Provide`/`@Consume` | `@Provider`/`@Consumer` | `@Consumer` 必须有本地默认值；`@Provider` 默认允许同名重载 |
-| `@Watch` | `@Monitor` | `@Monitor` 可深层监听；一次事件多次变化仅以最终结果判断是否触发 |
-| AppStorage / Environment / PersistentStorage | AppStorageV2 / 调 Ability 接口 / PersistenceV2 | V2 持久化不再与 AppStorage 耦合 |
-| `$$` | `!!` | 双向绑定语法糖（API 12+） |
-| `@Reusable` | `@ReusableV2` | API 18+ |
-| `@CustomDialog` | `openCustomDialog` 接口 | V2 推荐接口式弹窗 |
-
-迁移：`arkts-v1-v2-migration.md` 提供「V1与V2能力对照迁移表」与「逐步迁移策略」；overview 明确「新开发的应用建议直接用 V2」，已用 V1 且功能性能满足则「不必立即切换」；混用见 `arkts-v1-v2-mixusage.md`；更新时序差异见 `arkts-v1-v2-update-difference.md`。
-
-#### 3.4.2 `@ObservedV2` + `@Trace`
+#### 3.6.1 基本用法
 
 ```ts
 @ObservedV2
@@ -1040,9 +981,9 @@ struct Index {
 
 `@Trace` 支持 number/string/boolean/class/Array/Date/Map/Set，**不支持 Function**；嵌套类与继承类中的 `@Trace` 属性同样可观察。
 
-#### 3.4.3 `@Local` / `@Param` / `@Once` / `@Event` / `!!`
+#### 3.6.2 嵌套对象与数组
 
-`@Param`：能否本地修改＝**否**；同步类型＝**由父到子单向同步**；需本地改配 `@Once`（仅初始化时同步一次），需回传配 `@Event`（组件输出）；无本地初始化时必须配 `@Require`。
+`@Param` 传递 class 实例时传的是**引用**；配合 `@ObservedV2 + @Trace`，子组件既能在父组件替换整体时更新，也能感知深层属性变化。下面的 `Info`、`Region` 需按 V2 模型声明：类上加 `@ObservedV2`，需要观察的属性加 `@Trace`。
 
 ```ts
 @Entry
@@ -1074,20 +1015,7 @@ struct MiddleComponent {
 ```
 > 来源：`ui/state-management/state-management_arkts-new-param.md`「从父组件到子组件变量传递与同步」
 
-双向写法（`arkts-new-binding.md`）：
-
-```ts
-@ComponentV2
-struct Child {
-  @Param value: number = 0;
-  @Event $value: (val: number) => void = (val: number) => {};
-  build() { Button('change in child').onClick(() => { this.$value(10); }) }
-}
-Child({ value: this.value, $value: (val: number) => { this.value = val; } })
-Star({ value: this.value!! })   // !! 语法糖，等价于上一行
-```
-
-#### 3.4.4 `@Computed` / `@Monitor` / `@SyncMonitor` / 同步刷新
+### 3.7 派生与监听：`@Computed` / `@Monitor` / `@SyncMonitor`
 
 ```ts
 @Entry
@@ -1100,7 +1028,7 @@ struct CustomComponentUse {
   @Computed
   get fullName() { return this.firstName + ' ' + this.lastName + this.age; }
 
-  @Monitor('message', 'name')
+  @Monitor('firstName', 'lastName')
   onStrChange(monitor: IMonitor) {
     monitor.dirty.forEach((path: string) => {
       hilog.info(0xFF00, 'testTag', `${path}: ${monitor.value(path)?.before} -> ${monitor.value(path)?.now}`);
@@ -1125,43 +1053,63 @@ struct CustomComponentUse {
 - `UIUtils.flushUpdates()`：同步刷新此前所有修改（同样执行 `@Computed` 与 `@Monitor`）；
 - `UIUtils.flushUIUpdates()`：**只**同步刷新 UI 节点，不执行 `@Computed` 与 `@Monitor`（避免一次点击触发两次回调）。
 
-`makeObserved`（`arkts-new-makeObserved.md`）：用于 `@ObservedV2/@Trace` 覆盖不了的场景——class 在三方包中、成员属性不可修改（`@Sendable`）、interface 或 `JSON.parse` 的匿名对象。写法 `@Local message: Info = UIUtils.makeObserved(new Info(20));`；仅支持非空对象入参，`undefined`/`null` 返回自身，非 Object 编译报错；入参已是 `@Observed` 实例则直接返回自身。（未收录 `canBeObserved` 的说明，此处不作描述。）
+`makeObserved`（`arkts-new-makeObserved.md`）：用于 `@ObservedV2/@Trace` 覆盖不了的场景——class 在三方包中、成员属性不可修改（`@Sendable`）、interface 或 `JSON.parse` 的匿名对象。写法 `@Local message: Info = UIUtils.makeObserved(new Info(20));`；仅支持非空对象入参，`undefined`/`null` 返回自身，非 Object 编译报错。
 
-### 3.5 应用级 / 页面级存储
+### 3.8 应用级共享与持久化
 
-| 能力 | 版本 | 真实 API | 文档要点 |
-| --- | --- | --- | --- |
-| AppStorage | V1 | `AppStorage.setOrCreate('propA', 47)`；`@StorageProp('k')`/`@StorageLink('k')` | 应用内单例 LocalStorage，与进程绑定；`@StorageLink` 改动写回，AppStorage 变动同步给所有单向+双向绑定；key 必须 string；不支持 Function |
-| LocalStorage | V1 | `new LocalStorage()`、`storage.setOrCreate(...)`、`@LocalStorageProp`/`@LocalStorageLink`、`@Entry(storage)` | 页面级内存「数据库」；装饰器不支持从父节点初始化，只能按 key 从 LocalStorage 取，无 key 用本地默认值 |
-| PersistentStorage | V1 | `PersistentStorage.persistProp(key, defaultValue)`、`deleteProp`、`persistProps`、`keys` | 先建 AppStorage 属性再调 `persistProp` 会用内存值覆盖磁盘值，建议相反顺序 |
-| Environment | V1 | `Environment.envProp('languageCode', 'en')`、`envOverride` | 更新链 Environment → AppStorage → Component；须与 UIContext 关联，文档示例在 `UIContext.runScopedTask` 内调用；属性为不可变简单类型 |
-| AppStorageV2 | V2 | `AppStorageV2.connect<Message>(Message, () => new Message())!`、`remove`、`keys` | 只支持 class；不支持基本类型、`collections.Set/Map`、PixelMap 等 Native 类型；需 UI 线程；同 key 连不同类型会导致应用异常 |
-| PersistenceV2 | V2 | `connect` / `globalConnect` / `save` / `notifyOnError` / `keys` | 关联 `@ObservedV2` 对象的 `@Trace` 属性变化触发**整个对象自动持久化**；被持久化属性必须有初值；建议用 `globalConnect`（`connect` 为 module 级路径，多 module 会有多份副本） |
+V2 的跨页面/跨组件共享用 `AppStorageV2`，落盘用 `PersistenceV2`；两者都以 class 为粒度，配合 `@ObservedV2`/`@Trace` 自动同步。
 
-AppStorage 是「中枢」，把持久化数据与环境变量中转给 UI。仅用于消息传递、不驱动 UI 的场景，官方推荐 `emitter`，不要借 `@StorageLink` 的双向同步做事件通知。
+| 能力 | 真实 API | 文档要点 |
+| --- | --- | --- |
+| AppStorageV2 | `AppStorageV2.connect<Message>(Message, () => new Message())!`、`remove`、`keys` | 只支持 class；不支持基本类型、`collections.Set/Map`、PixelMap 等 Native 类型；需 UI 线程；同 key 连不同类型会导致应用异常 |
+| PersistenceV2 | `connect` / `globalConnect` / `save` / `notifyOnError` / `keys` | 关联 `@ObservedV2` 对象的 `@Trace` 属性变化触发**整个对象自动持久化**；被持久化属性必须有初值；建议用 `globalConnect`（`connect` 为 module 级路径，多 module 会有多份副本） |
+
+仅用于消息传递、不驱动 UI 的场景，官方推荐 `emitter`，不要把共享对象当事件总线。
 
 ```ts
-AppStorage.setOrCreate('propA', 47);
-AppStorage.setOrCreate('propB', new Data(50));
-let storage = new LocalStorage();
-storage.setOrCreate('linkA', 48);
+import { AppStorageV2 } from '@kit.ArkUI';
 
-@Entry(storage)
-@Component
-struct TestStorageProp {
-  @StorageLink('propA') storageLink: number = 1;
-  @StorageProp('propA') storageProp: number = 1;
-  @StorageLink('propB') storageLinkObject: Data = new Data(1);
+@ObservedV2
+class Message {
+  @Trace content: string = 'Hello';
+}
+
+@Entry
+@ComponentV2
+struct Index {
+  @Local message: Message = AppStorageV2.connect(Message, () => new Message())!;
+
+  build() {
+    Column() {
+      Text(this.message.content)
+      Button('change').onClick(() => { this.message.content = 'Hi'; })
+    }
+  }
 }
 ```
-> 来源：`ui/state-management/state-management_arkts-appstorage.md`「从UI内部使用AppStorage」
 
-### 3.6 渲染控制
+```ts
+import { PersistenceV2 } from '@kit.ArkUI';
+
+@ObservedV2
+class Settings {
+  @Trace language: string = 'zh-CN';
+  @Trace fontSize: number = 16;
+
+  static readonly storage: Settings = PersistenceV2.globalConnect({
+    type: Settings,
+    defaultCreator: () => new Settings()
+  })!;
+}
+```
+> 来源：`ui/state-management/state-management_arkts-appstorageV2.md`、`ui/state-management/state-management_arkts-persistentV2.md`
+
+### 3.9 渲染控制
 
 | 能力 | 加载 | 复用 | 约束 |
 | --- | --- | --- | --- |
 | `if/else` | 按分支构建 | — | 条件可用状态变量或常规变量，**常规变量变化不重渲染** |
-| `ForEach` | 全量 | 需配 `@Reusable`/`@ReusableV2` | 键值生成规则严格 |
+| `ForEach` | 全量 | 需配 `@ReusableV2` | 键值生成规则严格 |
 | `LazyForEach` | 懒加载 | ✗（自管） | 必须实现 `IDataSource` |
 | `Repeat` | 懒加载/全量可选 | ✓ 默认开启 | V2，在 `@ComponentV2` 中使用 |
 
@@ -1232,10 +1180,10 @@ struct RepeatLazyLoadingLongData {
 
 要点：`.each()` 等价于 template type 为空字符串的 `.template()`；多类型子组件用 `.templateId()` 求 type，type 不存在回落默认模板；`.key()` 缺省时生成随机键值，发现重复 key 会递归生成新键值；允许在 `.key()` 用 index 但**不建议**（移动时 index 与 key 同变，被判定为数据变化而重建）；懒加载默认开启节点复用，API 18 起可用 `.virtualScroll()` 的 `reusable` 字段关闭；长列表（数据长度大于 30）关闭懒加载会一次性全量加载，官方「不建议使用」。Repeat 文档中**未出现 `twoWayBinding`**（全库 grep 无命中），故不描述。
 
-**@Builder / @BuilderParam**：`@Builder` 分组件内私有与全局两种，参数传递有按引用（随状态刷新）、按值（不随状态刷新）、按回调三种规则；文档「常见问题」列出多参数、`@Builder` 嵌套、在其内创建自定义组件传参不刷新、在 UI 语句外调用影响节点刷新、在其内修改入参、在 `@Watch` 中执行 `@Builder` 等真实坑位。`@BuilderParam` 作插槽，常配空 `@Builder` 作默认值：
+**@Builder / @BuilderParam**：`@Builder` 分组件内私有与全局两种，参数传递有按引用（随状态刷新）、按值（不随状态刷新）、按回调三种规则；文档「常见问题」列出多参数、`@Builder` 嵌套、在其内创建自定义组件传参不刷新、在 UI 语句外调用影响节点刷新、在其内修改入参、在 `@Monitor` 中执行 `@Builder` 等真实坑位。`@BuilderParam` 作插槽，常配空 `@Builder` 作默认值：
 
 ```ts
-@Component
+@ComponentV2
 struct CustomLayout {
   @Builder doNothingBuilder() { };
   @BuilderParam builder: () => void = this.doNothingBuilder;
@@ -1251,34 +1199,33 @@ struct CustomLayout {
 ```
 > 来源：`ui/state-management/state-management_arkts-extend.md`
 
-### 3.7 组件复用与按需更新
+### 3.10 组件复用与按需更新
 
-- **`@Reusable`（V1）**：组件下树时「自定义组件（包含视图节点、组件实例和状态上下文）将被放入其**父自定义组件**的缓存池」，新建节点优先复用。提供 `aboutToRecycle`/`aboutToReuse`，且会**递归调用所有子组件**这两个回调（与子组件是否被标记无关）。限制：仅用于自定义组件；复用前后结构需一致，结构差异用 `reuseId` 区分；不支持 `ComponentContent`；不建议嵌套使用；在子组件 `aboutToReuse` 中改父组件状态变量不生效，需 `setTimeout` 移出复用作用域。
-- **`@ReusableV2`（API 18+）**：只装饰 `@ComponentV2` 组件，且只能作为 V2 组件的子组件（放进 V1 组件会编译期报错）。`aboutToReuse` **无入参**；回收期间组件保持冻结——无法触发 UI 刷新、无法触发 `@Monitor`，且解冻后不补做延后刷新（与 `freezeWhenInactive` 的区别）；复用前自动重置组件内状态变量并重算相关 `@Computed`/`@Monitor`，所有 V2 组件无论是否标记都经历该重置；不建议在 `aboutToRecycle` 中改状态变量。
-- **组件冻结**（`arkts-custom-components-freeze.md`）：`@Component({ freezeWhenInactive: true })` 激活后「系统将仅对处于激活状态的自定义组件进行更新」，把更新范围缩到 active 组件；inactive 重新变 active 时状态管理框架补做必要刷新。active/inactive **不等于可见性**，目前仅 6 类场景：页面路由（栈顶 active）、TabContent、LazyForEach（屏上 active、缓存节点 inactive）、Navigation、组件复用（进池 inactive、上树 active）、以及它们的混用（API 17 及以下切 Tab 时 LazyForEach 全部置 active，API 18 起仅屏上节点 active）。限制：`BuilderNode` 无法继承父组件冻结；冻结与复用混用时解冻不会触发 `@Watch`。
-- **按需更新组合拳**：`@Track`（V1 属性级）解决「只改 `name` 却刷新绑定 `age` 的 Text」；`@Computed` 解决多处重复计算；V2 `@Param/@Event` 明确输入输出减少无谓同步；`freezeWhenInactive` 与 `@ReusableV2` 复用期冻结消除不可见组件刷新。UI 高性能文档给出的思路含「惰性加载优先」「更新代替重建」（指向组件复用）「状态精确控制」；可用 DevEco Studio Profiler 的状态管理打点定位（`arkts-state-management-introduce.md` 附 trace 图）。
+- **`@ReusableV2`（API 18+）**：只装饰 `@ComponentV2` 组件，且只能作为 V2 组件的子组件。`aboutToReuse` **无入参**；回收期间组件保持冻结——无法触发 UI 刷新、无法触发 `@Monitor`，且解冻后不补做延后刷新（与 `freezeWhenInactive` 的区别）；复用前自动重置组件内状态变量并重算相关 `@Computed`/`@Monitor`，所有 V2 组件无论是否标记都经历该重置；不建议在 `aboutToRecycle` 中改状态变量。
+- **组件冻结**（`arkts-custom-components-freeze.md`）：`@ComponentV2({ freezeWhenInactive: true })` 激活后「系统将仅对处于激活状态的自定义组件进行更新」，把更新范围缩到 active 组件；inactive 重新变 active 时状态管理框架补做必要刷新。active/inactive **不等于可见性**，目前仅 6 类场景：页面路由（栈顶 active）、TabContent、LazyForEach（屏上 active、缓存节点 inactive）、Navigation、组件复用（进池 inactive、上树 active）、以及它们的混用（API 17 及以下切 Tab 时 LazyForEach 全部置 active，API 18 起仅屏上节点 active）。限制：`BuilderNode` 无法继承父组件冻结。
+- **按需更新组合拳**：`@Trace` 做属性级精准更新；`@Computed` 解决多处重复计算；`@Param`/`@Event` 明确输入输出减少无谓同步；`freezeWhenInactive` 与 `@ReusableV2` 在复用期冻结不可见组件。UI 高性能文档给出的思路含「惰性加载优先」「更新代替重建」（指向组件复用）「状态精确控制」；可用 DevEco Studio Profiler 的状态管理打点定位（`arkts-state-management-introduce.md` 附 trace 图）。
 
-### 3.8 与 Vue3 / React 对照（只到语法层）
+### 3.11 与 Vue3 / React 对照（只到语法层）
 
 | ArkUI | Vue 3 | React | 不一样在哪 |
 | --- | --- | --- | --- |
-| `@State` / `@Local` | `ref()` / `reactive()` | `useState()` | ArkUI 必须在变量上写装饰器；Vue 靠 Proxy 依赖收集，React 靠重新执行函数 + diff |
-| `@Prop` | `props` | props | ArkUI `@Prop` 允许本地改但不回传；Vue/React 的 props 只读 |
-| `@Link` / `!!` | `v-model` | 受控 value + onChange | ArkUI V1 由框架封装双向，V2 需自己写 `@Param`+`@Event` |
-| `@Provide`/`@Consume` | `provide/inject` | Context | ArkUI 是**双向**同步；Vue 的 provide 默认不回传 |
-| `@Observed`+`@ObjectLink` | 深层 `reactive` | 无对应（需换新引用） | ArkUI 需专门组合才能观察第二层 |
-| `@Watch` / `@Monitor` | `watch` / `watchEffect` | `useEffect` | V2 `@Monitor` 异步、多次变化只看最终值 |
+| `@Local` | `ref()` / `reactive()` | `useState()` | ArkUI 必须在变量上写装饰器；Vue 靠 Proxy 依赖收集，React 靠重新执行函数 + diff |
+| `@Param` | `props` | props | 子组件只读；需要本地改时配 `@Once`，需要回传时配 `@Event` |
+| `@Param` + `@Event` / `!!` | `v-model` | 受控 value + onChange | ArkUI 由 `@Event` 显式写回父组件，`!!` 是语法糖 |
+| `@Provider`/`@Consumer` | `provide/inject` | Context | ArkUI 是**双向**同步；Vue 的 provide 默认不回传 |
+| `@ObservedV2`+`@Trace` | 深层 `reactive` | 无对应（需换新引用） | ArkUI 用 `@Trace` 标记需要观察的属性 |
+| `@Monitor` / `@SyncMonitor` | `watch` / `watchEffect` | `useEffect` | `@Monitor` 默认异步、多次变化只看最终值 |
 | `@Computed` | `computed()` | `useMemo()` | ArkUI 文档同样主张「仅一处使用就别加」 |
-| AppStorage / PersistentStorage | Pinia / persist 插件 | 外部 store | ArkUI 内置、按 key 绑定装饰器，且限定 UI 主线程 |
+| AppStorageV2 / PersistenceV2 | Pinia / persist 插件 | 外部 store | ArkUI 按 class 共享，且限定 UI 主线程 |
 | ForEach / LazyForEach / Repeat | `v-for` + 虚拟列表 | `map` + `key` + 虚拟化库 | LazyForEach 必须自己实现 `IDataSource` |
 
-收束：ArkUI 的响应式**由装饰器声明、由框架生成的 `rerender` 驱动、以自定义组件为单位标脏**；它既非 Vue 的 Proxy 拦截 + 依赖收集，也非 React 的函数重跑 + 树 diff。搬直觉时最容易踩的两点：V1 只能观察第一层、ForEach 靠 key 判定是否把新数据同步给子组件。
+收束：ArkUI 的响应式**由装饰器声明、由框架生成的 `rerender` 驱动、以自定义组件为单位标脏**；它既非 Vue 的 Proxy 拦截 + 依赖收集，也非 React 的函数重跑 + 树 diff。搬直觉时最容易踩的两点：类属性必须标 `@Trace` 才能深度观察、ForEach 靠 key 判定是否把新数据同步给子组件。
 
 ---
 
 ## 四、组件清单与自定义组件
 
-> 本章内容取自 OpenHarmony ArkUI API 参考与开发指南，每个示例后注明源文件名，示例为原文节选（保留原注释与写法）。
+> 本章内容取自 OpenHarmony ArkUI API 参考与开发指南，每个示例后注明源文件名。示例保留原文的核心 API 与注释，统一改写为 V2 组件与状态管理写法。
 >
 > **关于「HarmonyOS 扩展高级组件」**：OpenHarmony 仓库不含 `ohos-arkui-advanced-*`（Dialog、SplitLayout、ComposeTitleBar 等属 HarmonyOS 侧 ArkUI 扩展），因此 1.6 节按官方文档实际收录、且带特殊系统能力/设备形态约束的组件归集，不虚构该系列。
 
@@ -1341,7 +1288,7 @@ struct CustomLayout {
 | `Swiper` | 滑块视图容器，轮播 | `index`、`autoPlay`、`indicator`、`loop`；`onChange`、`onAnimationStart` |
 | `Tabs` | 页签切换内容视图容器 | `vertical`、`scrollable`、`barMode`；`onChange`、`onTabBarClick` |
 | `TabContent` | Tabs 中一个页签的内容视图 | `tabBar`；`onWillShow`、`onWillHide` |
-| `Refresh` | 下拉刷新容器（单子组件） | `refreshing`(`$$`)、`pullToRefresh`；`onStateChange`、`onRefreshing` |
+| `Refresh` | 下拉刷新容器（单子组件） | `refreshing`(`!!`)、`pullToRefresh`；`onStateChange`、`onRefreshing` |
 | `Panel` | 可滑动面板，轻量内容展示窗口 | `type`、`mode`、`dragBar`、`customHeight`；`onChange`、`onHeightChange` |
 | `Badge` | 信息标记，附加在单个组件上 | `count`、`position`、`style`(`BadgeParamWithNumber`) |
 | `AlphabetIndexer` | 字母索引，与容器联动快速定位 | `arrayValue`、`selectedColor`；`onSelect`、`onRequestPopupData` |
@@ -1435,7 +1382,7 @@ Text('This is the text content with the decoration set to LineThrough and the co
 
 ```ts
 @Entry
-@Component
+@ComponentV2
 struct ImageExample1 {
   build() {
     Column() {
@@ -1454,9 +1401,9 @@ struct ImageExample1 {
 
 ```ts
 @Entry
-@Component
+@ComponentV2
 struct TextInputExample {
-  @State text: string = '';
+  @Local text: string = '';
   controller: TextInputController = new TextInputController();
 
   build() {
@@ -1507,7 +1454,7 @@ QRCode(this.value).width(140).height(140).color(Color.Black).contentOpacity(0.1)
 
 ```ts
 @Entry
-@Component
+@ComponentV2
 struct StackExample {
   build() {
     Stack({ alignContent: Alignment.Bottom }) {
@@ -1556,15 +1503,15 @@ Grid() {
 .zIndex(this.dragItem == item ? 1 : 0)   // 同文档拖拽示例：用 zIndex 控制层叠
 ```
 
-**Refresh**（`ts-container-refresh.md` 示例，节选；`$$` 双向绑定 `refreshing`）
+**Refresh**（`ts-container-refresh.md` 示例，节选；`!!` 双向绑定 `refreshing`）
 
 ```ts
 @Entry
-@Component
+@ComponentV2
 struct RefreshExample {
-  @State isRefreshing: boolean = false;
+  @Local isRefreshing: boolean = false;
   build() {
-    Refresh({ refreshing: $$this.isRefreshing }) {
+    Refresh({ refreshing: this.isRefreshing!! }) {
       List() {
         ForEach(this.arr, (item: string) => { ListItem() { Text('' + item) } }, (item: string) => item)
       }
@@ -1583,7 +1530,7 @@ struct RefreshExample {
 
 ```ts
 @Entry
-@Component
+@ComponentV2
 struct CanvasExample {
   private settings: RenderingContextSettings = new RenderingContextSettings(true);
   private context: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.settings);
@@ -1615,12 +1562,12 @@ struct CanvasExample {
 
 ```ts
 @Entry
-@Component
+@ComponentV2
 struct VideoCreateComponent {
-  @State videoSrc: Resource = $rawfile('video1.mp4');
-  @State previewUri: Resource = $r('app.media.poster1');
-  @State isAutoPlay: boolean = false;
-  @State showControls: boolean = true;
+  @Local videoSrc: Resource = $rawfile('video1.mp4');
+  @Local previewUri: Resource = $r('app.media.poster1');
+  @Local isAutoPlay: boolean = false;
+  @Local showControls: boolean = true;
   controller: VideoController = new VideoController();
 
   build() {
@@ -1647,7 +1594,7 @@ import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { fileIo } from '@kit.CoreFileKit';
 
 @Entry
-@Component
+@ComponentV2
 struct Index {
   handleSaveButtonClick: SaveButtonCallback =
     async (event: ClickEvent, result: SaveButtonOnClickResult, error?: BusinessError) => {
@@ -1673,7 +1620,7 @@ struct Index {
 
 ```ts
 @Entry
-@Component
+@ComponentV2
 struct Index {
   handlePasteButtonClick: PasteButtonCallback =
     (event: ClickEvent, result: PasteButtonOnClickResult, error?: BusinessError<void>) => {
@@ -1802,14 +1749,14 @@ ArcList({ initialIndex: 0, header: this.tabBar1 }) {
 
 ### 4.3 自定义组件与 UI 片段复用
 
-#### 4.3.1 `@Entry` / `@Component` / `struct` / `build()`
+#### 4.3.1 `@Entry` / `@ComponentV2` / `struct` / `build()`
 
 源：`ui/state-management/state-management_arkts-create-custom-components.md`。
 
 ```ts
-@Component
+@ComponentV2
 struct HelloComponent {
-  @State message: string = 'Hello, World!';
+  @Param @Once message: string = 'Hello, World!';
 
   build() {
     // HelloComponent自定义组件组合系统组件Row和Text
@@ -1824,7 +1771,7 @@ struct HelloComponent {
 }
 
 @Entry            // @Entry 装饰的组件是页面入口，单页面仅允许一个
-@Component
+@ComponentV2
 struct ParentComponent {
   build() {
     Column() {
@@ -1837,7 +1784,7 @@ struct ParentComponent {
 }
 ```
 
-要点（原文）：「自定义组件基于 struct 实现，struct + 自定义组件名 + {...} 的组合构成自定义组件，不能有继承关系」；「自定义组件名、类名、函数名不得与系统组件名重复」；`@Entry` 可接受可选 `LocalStorage` 或 `EntryOptions`（`@Entry({ routeName: 'myPage' })`）；`@ComponentV2`（API 12+）装饰的组件内只能使用 V2 状态变量（`@Local`/`@Param`/`@Once`/`@Event`/`@Provider`/`@Consumer`），且不能与 `@Component` 混用于同一 struct。
+要点（原文）：「自定义组件基于 struct 实现，struct + 自定义组件名 + {...} 的组合构成自定义组件，不能有继承关系」；「自定义组件名、类名、函数名不得与系统组件名重复」；`@Entry` 可接受可选 `EntryOptions`（`@Entry({ routeName: 'myPage' })`）；`@ComponentV2`（API 12+）装饰的组件内只能使用 V2 状态变量（`@Local`/`@Param`/`@Once`/`@Event`/`@Provider`/`@Consumer`）。示例中的 `@Param @Once` 表示该参数只在初始化时接收一次，之后允许子组件本地修改。
 
 #### 4.3.2 `@Builder`
 
@@ -1845,9 +1792,9 @@ struct ParentComponent {
 
 ```ts
 @Entry
-@Component
+@ComponentV2
 struct PrivateBuilder {
-  @State builderValue: string = 'Hello';
+  @Local builderValue: string = 'Hello';
 
   @Builder
   builder() {
@@ -1885,9 +1832,9 @@ function overBuilderByReference(params: Tmp) {
 }
 
 @Entry
-@Component
+@ComponentV2
 struct ParameterReference {
-  @State label: string = 'Hello';
+  @Local label: string = 'Hello';
   build() {
     Column() {
       overBuilderByReference({ paramA1: this.label })   // 关键：传的是字面量对象
@@ -1914,7 +1861,7 @@ function overBuilderByValue(paramA1: string) {
 
 ```ts
 @Entry
-@Component
+@ComponentV2
 struct Index {
   @BuilderParam my_builder2: () => void = placeholderBuilder2;   // 默认值 + 可由外部覆盖
 
@@ -1928,7 +1875,7 @@ struct Index {
 }
 ```
 
-`ui/state-management/state-management_arkts-provide-and-consume.md` 专门提示尾随闭包场景下 `this` 指向问题：`CustomWidget() { CustomWidgetChild({ builder: this.builder2 }) }` 中尾随闭包里的 `this` 指向 HomePage 而非 CustomWidget，导致子组件 `@Consume` 找不到 CustomWidget 的 `@Provide`。
+`ui/state-management/state-management_arkts-provide-and-consume.md` 专门提示尾随闭包场景下 `this` 指向问题：`CustomWidget() { CustomWidgetChild({ builder: this.builder2 }) }` 中尾随闭包里的 `this` 指向 HomePage 而非 CustomWidget，导致子组件 `@Consumer` 找不到 CustomWidget 的 `@Provider`。
 
 #### 4.3.5 `@Styles` 与 `@Extend`
 
@@ -1942,9 +1889,9 @@ function globalFancy1() {
 }
 
 @Entry
-@Component
+@ComponentV2
 struct GlobalFancy {
-  @State heightValue: number = 100;
+  @Local heightValue: number = 100;
 
   @Styles                    // 组件内@Styles可引用状态变量、可写事件
   fancy() {
@@ -1979,11 +1926,11 @@ function superFancyText(size: number) {
 
 #### 4.3.6 `@Require`
 
-源：`arkts-new-param.md`（`@Require` 无独立文档页，此处以其在 V2/V1 中的实际用法为准）。
+源：`arkts-new-param.md`（`@Require` 无独立文档页，此处以其在 V2 中的实际用法为准）。
 
 ```ts
 @Entry
-@Component
+@ComponentV2
 struct Parent {
   @Local count: number = 0;
   @Local message: string = 'Hello';
@@ -2004,7 +1951,7 @@ struct Child {
 }
 ```
 
-V1 同理：`@Require @Prop text: string`（见 `ts-container-flex.md`）。`arkts-new-param.md` 原文：「允许本地初始化，若不在本地初始化，则需要和 `@Require` 装饰器一起使用，要求必须从外部传入初始化」。
+`arkts-new-param.md` 原文：「允许本地初始化，若不在本地初始化，则需要和 `@Require` 装饰器一起使用，要求必须从外部传入初始化」。
 
 ### 4.4 组件生命周期
 
@@ -2018,36 +1965,17 @@ V1 同理：`@Require @Prop text: string`（见 `ts-container-flex.md`）。`ark
 | 点击返回键 | `onBackPress(): void \| boolean` | 返回 true 表示自行处理，不做路由返回 |
 | 主题应用（`build()` 前） | `onWillApplyTheme(theme: Theme)`（API 12+） | 可改状态变量；API 18 起支持 V2 组件 |
 | 路由单实例移到栈顶 | `onNewParam(param)`（API 19+） | 仅 `@Entry` 且作为 router 页面时生效 |
-| 复用组件入树 | `aboutToReuse(params)`（API 10+）/ `aboutToReuse()`（API 18+ 无参重载） | 构造参数通过 `params` 传入；避免对 `@Link/@ObjectLink/@Prop` 重复赋值 |
-| 复用组件进缓存 | `aboutToRecycle()`（API 10+） | 加入复用缓存前调用 |
-| 析构销毁 | `aboutToDisappear()` | 禁止改状态变量（尤其 `@Link`）；不建议在其后创建弹窗；不建议 `async await`（阻塞 GC） |
+| 复用组件入树 | `aboutToReuse()`（API 18+） | V2 复用回调无入参；复用前框架自动重置组件内状态变量 |
+| 复用组件进缓存 | `aboutToRecycle()` | 加入复用缓存前调用 |
+| 析构销毁 | `aboutToDisappear()` | 禁止改状态变量；不建议在其后创建弹窗；不建议 `async await`（阻塞 GC） |
 | ArkTS 卡片表单 | `onFormRecycle()` / `onFormRecover()`（API 11+） | 卡片场景复用/恢复 |
 | 页面转场 | `pageTransition()`（API 9+） | 进入/离开页面时实现动画 |
 
 删除机制原文：「在删除组件之前，将调用其 `aboutToDisappear` 生命周期函数……后端节点直接从组件树上摘下，后端节点被销毁，对前端节点解引用，前端节点已经没有引用时，将被 Ark 虚拟机垃圾回收」。
 
-#### 4.4.2 代码（V1 复用；源：`ts-custom-component-lifecycle.md#aboutToReuse`）
+#### 4.4.2 复用组件代码
 
-```ts
-@Reusable
-@Component
-struct Child {
-  @State message: Message = new Message('AboutToReuse');
-
-  aboutToReuse(params: Record<string, ESObject>) {
-    console.info("Recycle Child")
-    this.message = params.message as Message
-  }
-
-  build() {
-    Column() { Text(this.message.value).fontSize(20) }.borderWidth(2).height(100)
-  }
-}
-```
-
-#### 4.4.3 V2 侧实际出现的回调
-
-源：`ui/state-management/arkts-new-reusableV2.md`。V2 组件仍可用 `aboutToAppear`/`aboutToDisappear`，`@ReusableV2` 提供 `aboutToRecycle`/`aboutToReuse`，**与 `@Reusable` 不同的是 `aboutToReuse` 没有入参**；回收/复用阶段会递归调用所有子组件的对应回调（即使子组件未标记可复用）；`@ReusableV2` 复用时自动重置组件内状态变量、重算 `@Computed` 及相关 `@Monitor`。文档不建议在 `aboutToRecycle` 中改状态变量。
+源：`ui/state-management/arkts-new-reusableV2.md`。V2 组件仍可用 `aboutToAppear`/`aboutToDisappear`，`@ReusableV2` 提供 `aboutToRecycle`/`aboutToReuse`，`aboutToReuse` **没有入参**；回收/复用阶段会递归调用所有子组件的对应回调（即使子组件未标记可复用）；`@ReusableV2` 复用时自动重置组件内状态变量、重算 `@Computed` 及相关 `@Monitor`。文档不建议在 `aboutToRecycle` 中改状态变量。
 
 ```ts
 @ReusableV2
@@ -2091,13 +2019,13 @@ V2 的 `@Monitor` 是**异步监听**装饰器（不是生命周期回调）；`
 
 ### 4.6 弹窗与选择
 
-官方文档收录：`ts-methods-alert-dialog-box.md`（AlertDialog）、`ts-methods-custom-dialog-box.md`（CustomDialog）、`ts-methods-action-sheet.md`（ActionSheet）、`js-apis-promptAction.md`、`arkts-create-toast.md`、`arkts-dialog-overview.md`、`arkts-modal-overview.md`、`arkts-menu-overview.md`、`arkts-popup-overview.md`、`ts-basic-components-menu.md`。
+官方文档收录：`ts-methods-alert-dialog-box.md`（AlertDialog）、`ts-methods-action-sheet.md`（ActionSheet）、`js-apis-promptAction.md`、`arkts-create-toast.md`、`arkts-dialog-overview.md`、`arkts-modal-overview.md`、`arkts-menu-overview.md`、`arkts-popup-overview.md`、`ts-basic-components-menu.md`。
 
 | 能力 | 官方文档 | 推荐调用方式（原文要点） |
 | --- | --- | --- |
 | 警告弹窗 | `ts-methods-alert-dialog-box.md` | `this.getUIContext().showAlertDialog({...})`；`AlertDialog.show()` 已 deprecated |
 | 列表选择弹窗 | `ts-methods-action-sheet.md` | `this.getUIContext().showActionSheet({ sheets: [...] })`；`ActionSheet.show()` 已 deprecated |
-| 自定义弹窗 | `ts-methods-custom-dialog-box.md` | `@CustomDialog` + `CustomDialogController`（`open()`/`close()`/`getState()`），controller 须作为 struct 成员变量在内部定义赋值才有效 |
+| 自定义弹窗 | `js-apis-promptAction.md` | `openCustomDialog({ builder })` 打开并返回 `dialogId`；`closeCustomDialog(dialogId)` 关闭 |
 | 即时反馈 | `ui/arkts-create-toast.md`、`js-apis-promptAction.md` | `this.getUIContext().getPromptAction().showToast({...})`；全局 `promptAction.showToast` 自 API 18 起废弃 |
 | 半模态/全模态 | `ui/arkts-modal-overview.md` | `bindSheet` 半模态、`bindContentCover` 全屏模态；不依赖 UI 组件的场景用 `openBindSheet`/`updateBindSheet`/`closeBindSheet` |
 | 菜单/气泡 | `ui/arkts-menu-overview.md`、`ui/arkts-popup-overview.md` | `bindMenu`/`bindContextMenu` + `Menu`；`bindPopup` 或 `openPopup`（需有效 `TargetInfo`） |
@@ -2127,42 +2055,43 @@ Button('one button dialog')
   .backgroundColor(0x317aff)
 ```
 
-**CustomDialog**（`ts-methods-custom-dialog-box.md` 示例1，节选）
+**openCustomDialog**（接口式自定义弹窗）
 
 ```ts
-@CustomDialog
-struct CustomDialogExample {
-  controller?: CustomDialogController;
-  cancel: () => void = () => {}
-  confirm: () => void = () => {}
+@Entry
+@ComponentV2
+struct DialogPage {
+  @Local textValue: string = '';
+  @Local dialogId: number = 0;
+
+  @Builder
+  dialogBuilder() {
+    Column({ space: 12 }) {
+      Text('Change text').fontSize(20)
+      TextInput({ placeholder: '', text: this.textValue })
+        .onChange((value: string) => { this.textValue = value; })
+      Row({ space: 12 }) {
+        Button('cancel').onClick(() => {
+          this.getUIContext().getPromptAction().closeCustomDialog(this.dialogId);
+        })
+        Button('confirm').onClick(() => {
+          console.info(`confirm: ${this.textValue}`);
+          this.getUIContext().getPromptAction().closeCustomDialog(this.dialogId);
+        })
+      }
+    }.padding(16)
+  }
+
+  openDialog() {
+    this.getUIContext().getPromptAction().openCustomDialog({
+      builder: () => { this.dialogBuilder(); },
+      autoCancel: true
+    }).then((id: number) => { this.dialogId = id; });
+  }
 
   build() {
-    Column() {
-      Text('Change text').fontSize(20).margin({ top: 10, bottom: 10 })
-      TextInput({ placeholder: '', text: this.textValue }).height(60).width('90%')
-        .onChange((value: string) => { this.textValue = value; })
-      Flex({ justifyContent: FlexAlign.SpaceAround }) {
-        Button('cancel').onClick(() => { if (this.controller != undefined) { this.controller.close(); this.cancel(); } })
-          .backgroundColor(0xffffff).fontColor(Color.Black)
-        Button('confirm').onClick(() => { if (this.controller != undefined) { this.controller.close(); this.confirm(); } })
-          .backgroundColor(0xffffff).fontColor(Color.Red)
-      }.margin({ bottom: 10 })
-    }.borderRadius(10)
+    Button('open custom dialog').onClick(() => { this.openDialog(); })
   }
-}
-
-@Entry
-@Component
-struct CustomDialogUser {
-  @State textValue: string = ''
-  dialogController: CustomDialogController | null = new CustomDialogController({
-    builder: CustomDialogExample({ cancel: () => { this.onCancel(); }, confirm: () => { this.onAccept(); },
-      textValue: this.textValue, inputValue: this.inputValue }),
-    autoCancel: true,
-    onWillDismiss: (dismissDialogAction: DismissDialogAction) => {
-      if (dismissDialogAction.reason == DismissReason.PRESS_BACK) { dismissDialogAction.dismiss(); }
-    },
-  })
 }
 ```
 
@@ -2433,11 +2362,11 @@ WaterFlow({ footer: this.itemFoot(), layoutMode: WaterFlowLayoutMode.SLIDING_WIN
 - **Scroll**：`Scroll(scroller?: Scroller)`，常用 `.scrollable(ScrollDirection.Vertical)`（默认 Vertical，枚举另有 Horizontal、Free(9 起废弃)、None、`FREE`(20+)）、`.scrollBar(BarState.On)`、`.scrollBarColor(Color.Gray)`、`.scrollBarWidth(10)`、`.friction(0.6)`、`.edgeEffect(EdgeEffect.None)`、`.onWillScroll((xOffset, yOffset, scrollState) => {})`。`Scroller` 同一控制器不可控多个容器；`scrollTo(options: ScrollOptions)` 字段为 `xOffset`/`yOffset`（不支持百分比）与 `animation`（默认 `{duration: 1000, curve: Curve.Ease, canOverScroll: false}`）；`scrollToIndex(value, smooth?, align?: ScrollAlign, options?)` 仅支持 ArcList/Grid/List/WaterFlow。控制器与组件的绑定发生在组件创建阶段，故在自定义组件 `aboutToAppear` 内调用滚动方法不生效，须在滚动组件的 `onAppear` 之后调用。
 - **Swiper**：`Swiper(controller?: SwiperController)`，示例属性链 `.index(1).autoPlay(true).interval(4000).loop(true).duration(1000).itemSpace(5).cachedCount(2).indicator(true).indicatorInteractive(true).prevMargin(35)`；`indicator` 可为 `DotIndicator`（圆点，默认）、`DigitIndicator`（数字）、`boolean`（默认 true）或 `IndicatorComponentController`；另有 `vertical`、`effectMode`、`displayCount`、`nextMargin`、`displayMode`、`disableSwipe`、`nestedScroll`。控制器方法 `showNext()`、`showPrevious()`、`changeIndex()`、`finishAnimation()`、`preloadItems()`。
 - **Tabs**：`Tabs(options?: TabsOptions)` 支持 `barPosition`（`BarPosition.Start` 默认 / `End`）、`index`、`controller`；属性 `vertical(value: boolean)`（是否纵向 Tab）、`barWidth(value: Length)`（未设置 SubTabBarStyle/BottomTabBarStyle 且 vertical 为 false 时默认取 Tabs 宽度，vertical 为 true 时默认 56vp；BottomTabBarStyle 且 vertical 为 true 时默认 96vp）、`barHeight`、`animationDuration`；子组件 `TabContent().tabBar(SubTabBarStyle.of(this.text))`，底部导航用 `BottomTabBarStyle`。
-- **Refresh**：真实写法是双向绑定 `$$`，`refreshing` 默认 false；`promptText`（12+）设置有效时 `refreshOffset` 默认由 64vp 变 96vp；API 12 起建议用 `refreshingContent` 替代 `builder` 自定义刷新区域，以避免刷新中自定义组件销毁重建导致动画中断；`friction` 自 API 11 废弃，建议用 `pullDownRatio` 替代。
+- **Refresh**：真实写法是双向绑定 `!!`，`refreshing` 默认 false；`promptText`（12+）设置有效时 `refreshOffset` 默认由 64vp 变 96vp；API 12 起建议用 `refreshingContent` 替代 `builder` 自定义刷新区域，以避免刷新中自定义组件销毁重建导致动画中断；`friction` 自 API 11 废弃，建议用 `pullDownRatio` 替代。
 
 ```typescript
-@State isRefreshing: boolean = false;
-Refresh({ refreshing: $$this.isRefreshing, promptText: this.promptText }) {
+@Local isRefreshing: boolean = false;
+Refresh({ refreshing: this.isRefreshing!!, promptText: this.promptText }) {
   List() { /* ... */ }
 }.onRefreshing(() => { /* 进入刷新状态时触发 */ })
  .onStateChange((refreshStatus: RefreshStatus) => { console.info('state is ' + refreshStatus) })
@@ -2470,9 +2399,9 @@ ArkUI 提供 4 种像素单位，**采用 vp 为基准数据单位**（下表为
 import { mediaquery } from '@kit.ArkUI';
 
 @Entry
-@Component
+@ComponentV2
 struct MediaQueryExample {
-  @State text: string = 'Portrait';
+  @Local text: string = 'Portrait';
   // 当设备横屏时条件成立
   listener: mediaquery.MediaQueryListener =
     this.getUIContext().getMediaQuery().matchMediaSync('(orientation: landscape)');
@@ -2487,7 +2416,7 @@ struct MediaQueryExample {
 
 语法为 `[media-type] [media-logic-operations] [(media-feature)]`，媒体类型未写时默认 `screen` 且必须写在开头；逻辑操作符 `and`、`or`、`not`、`only`、逗号 `,`（等同 or），其中 `not`/`only` **必须搭配 screen 使用**；范围操作符 `<=`、`>=`、`<`、`>`。媒体特征包含 `height/min-height/max-height`、`width/min-width/max-width`、`resolution`、`orientation`（portrait/landscape）、`device-height`、`device-width`、`device-type`（default、phone、tablet、tv、car、wearable、2in1）、`round-screen`、`dark-mode`（深色模式为 true）。**比较 height、width 等宽高尺寸时支持 vp 和 px 单位，无单位时默认为 px**。卡片中使用媒体查询只支持 `height`、`width`；`device-width` 当前仅在应用初始化时保存一次，不会随设备宽度变化实时更新。
 
-文档示例二演示横竖屏切换改变 Flex 方向：`@State dir: FlexDirection` 在回调里于 `FlexDirection.Row`/`Column` 间切换，配 `Flex({ direction: this.dir, space: { main: LengthMetrics.vp(10), cross: LengthMetrics.vp(5) } })` 与子项 `layoutWeight(1)`。
+文档示例二演示横竖屏切换改变 Flex 方向：`@Local dir: FlexDirection` 在回调里于 `FlexDirection.Row`/`Column` 间切换，配 `Flex({ direction: this.dir, space: { main: LengthMetrics.vp(10), cross: LengthMetrics.vp(5) } })` 与子项 `layoutWeight(1)`。
 
 与 Web 的对应关系，只列有文档依据的：① 媒体查询的语法结构、`and/or/not/only` 与 `min-/max-` 前缀特征命名同 CSS，但触发方式是 JS 回调判断 `matches` 后改状态变量，而非样式表级联，且无单位默认 px 这一点需注意；② Flex 容器侧字段与 Web flexbox 命名一一对应，但 ArkUI 交叉轴默认 `ItemAlign.Start`、主轴不设长度时撑满父容器（见 5.3 引用），迁移时以官方文档默认值为准；③ `GridRow/GridCol` 的六断点体系与 `onBreakpointChange` 是 ArkUI 自有能力，CSS 无直接对应。
 
@@ -2497,11 +2426,9 @@ struct MediaQueryExample {
 
 > 循环渲染适用于短列表，当构建具有大量列表项的长列表时，如果直接采用循环渲染方式，会一次性加载所有的列表元素，会导致页面启动时间过长，影响用户体验。因此，推荐使用数据懒加载（LazyForEach）方式实现按需迭代加载数据，从而提升列表性能。
 
-`@Reusable` 的作用在同文件「使用 LazyForEach 创建 ListItem」一节给出：
+V2 中用 `@ReusableV2` 标记可复用的自定义组件：List 滑动时，进入预加载及显示区域的 ListItem 被创建与布局；若其中包含 `@ReusableV2` 组件，会优先从全局复用池取用；滑出预加载及显示区域的 ListItem 被销毁，其中的组件被回收进池。
 
-> 当 List 组件滑动时，进入预加载及显示区域的 ListItem 将被创建与布局，创建 ListItem 过程中，若 ListItem 内部包含 @Reusable 标记的自定义组件，则会优先从缓存池中复用。滑出预加载及显示区域的 ListItem 将被销毁，其内部若含 @Reusable 标记的自定义组件，则会被回收并加入缓存池。
-
-即 **LazyForEach 决定「创建多少」，@Reusable 决定「创建方式是新建还是复用」**；`ReusableFlowItem`/`ReusableListItem` 在 `aboutToReuse(params: Record<string, number>)` 里重新赋值状态。配合 `cachedCount`：懒加载只预加载显示区域外 `cachedCount` 的内容，无论是否懒加载都只布局「显示区域 + 上下各 cachedCount」，增大 cachedCount 会增大 UI 的 CPU、内存开销；垂直列表下 `ListItemGroup` 内部 ListItem 会计入行数，组内无 ListItem 则整组算一行，LazyForEach 嵌套 ListItemGroup 时按「组」上下各创建 cachedCount 个。
+即 **LazyForEach 决定「创建多少」，`@ReusableV2` 决定「创建方式是新建还是复用」**。V2 复用时框架自动重置组件内状态变量，`aboutToReuse` 没有入参，因此不需要手动重新同步参数。配合 `cachedCount`：懒加载只预加载显示区域外 `cachedCount` 的内容，无论是否懒加载都只布局「显示区域 + 上下各 cachedCount」，增大 cachedCount 会增大 UI 的 CPU、内存开销；垂直列表下 `ListItemGroup` 内部 ListItem 会计入行数，组内无 ListItem 则整组算一行，LazyForEach 嵌套 ListItemGroup 时按「组」上下各创建 cachedCount 个。
 
 ---
 
@@ -2757,7 +2684,360 @@ gattClient.disconnect();
 gattClient.close();
 ```
 
-经典蓝牙走 `connection`（SPP/A2DP），GATT 服务端用 `ble.createGattServer()`（`on('addService')`/`sendResponse`）；广播用 `ble.startAdvertising` + `ble.AdvertiseData`。用完记得 `stopScan()`、`off('BLEDeviceFind')`、`off('BLECharacteristicChange')`。
+这段话描述的是 HarmonyOS 蓝牙开发中两类完全不同的通信体系：**经典蓝牙（BR/EDR）** 和 **低功耗蓝牙（BLE）**。经典蓝牙面向大数据量、流式传输场景（如串口透传、音频），BLE 面向低功耗、小数据量场景（如穿戴设备、传感器）。
+
+#### 7.2.1 三种方式总览
+
+| 方式 | 所属模块 | 底层协议 | 典型场景 |
+|---|---|---|---|
+| SPP 串口通信 | `socket`（@ohos.bluetooth.socket） | RFCOMM，适用于传统蓝牙 | 与串口打印机、OBD 设备、传统蓝牙模块透传数据 |
+| GATT 服务端/客户端 | `ble`（@ohos.bluetooth.ble） | GATT，基于 BLE | 智能穿戴、健康传感器、智能硬件配网 |
+| BLE 广播/扫描 | `ble`（@ohos.bluetooth.ble） | BLE 广播报文 | 让周边设备发现自己、发现周边设备 |
+
+其中 RFCOMM 链路类型就是串口通信协议（Serial Port Profile, SPP），适用于传统蓝牙；L2CAP 链路类型则同时适用于传统蓝牙和 BLE。BLE 模块支持扫描、广播以及基于通用属性协议（GATT）的连接和数据传输，适用于智能穿戴等低功耗场景。
+
+```mermaid
+flowchart TD
+    A[开始选择蓝牙通信方式] --> B{是否传输音频}
+    B -->|是| C[使用 A2DP 音频协议模块]
+    B -->|否| D{对端是否为低功耗设备<br/>如穿戴/传感器]
+    D -->|是| E[使用 BLE GATT 客户端或服务端]
+    D -->|否| F{是否为传统串口设备<br/>如打印机/OBD]
+    F -->|是| G[使用经典蓝牙 SPP 套接字]
+    F -->|否| H{是否只需被周围设备发现]
+    H -->|是| I[使用 BLE 广播]
+    H -->|否| J[使用 BLE 扫描主动发现设备]
+```
+
+### 二、经典蓝牙 SPP（socket 模块）
+
+**原理与适用场景**：SPP 模拟传统 RS232 串行通信，为上层应用提供简单可靠的双向数据流<rsub ref="E.3.1">2</rsub>。它基于套接字模型，服务端先监听、客户端再连接，适合与只支持经典蓝牙的硬件对接、或需要持续流式传输较大数据量的场景。
+
+**使用流程**：
+
+- 服务端：`sppListen` 创建监听套接字 → `sppAccept` 接受客户端连接 → `on('sppRead')` 接收数据 → `sppWrite` 发送数据<rsub ref="G.2.3">3</rsub>
+- 客户端：`sppConnect` 发起连接 → `on('sppRead')` 接收数据 → `sppWrite` 发送数据
+
+**服务端示例代码**：
+
+```typescript
+import { socket } from '@kit.ConnectivityKit';
+import { BusinessError } from '@kit.BasicServicesKit';
+
+let serverSocketId: number = -1;
+let clientSocketId: number = -1;
+
+function startSppServer(): void {
+  // SppOptions 中 uuid 为 RFCOMM 链路必填，可使用标准串口服务 UUID
+  let sppOption: socket.SppOptions = {
+    uuid: '00001101-0000-1000-8000-00805F9B34FB',
+    secure: true,
+    type: socket.SppType.SPP_RFCOMM
+  };
+  try {
+    socket.sppListen('mySppServer', sppOption, (err: BusinessError, serverSocket: number) => {
+      if (err) {
+        console.error(`sppListen errCode: ${err.code}, errMessage: ${err.message}`);
+        return;
+      }
+      serverSocketId = serverSocket;
+      // 接受客户端连接请求，回调返回客户端套接字 ID
+      socket.sppAccept(serverSocketId, (acceptErr: BusinessError, clientSocket: number) => {
+        if (acceptErr) {
+          console.error(`sppAccept errCode: ${acceptErr.code}, errMessage: ${acceptErr.message}`);
+          return;
+        }
+        clientSocketId = clientSocket;
+        // 订阅读请求事件，收到对端数据时触发回调
+        socket.on('sppRead', clientSocketId, (dataBuffer: ArrayBuffer) => {
+          let data: Uint8Array = new Uint8Array(dataBuffer);
+          console.info(`收到数据长度: ${data.byteLength}`);
+        });
+      });
+    });
+  } catch (err) {
+    console.error(`errCode: ${(err as BusinessError).code}, errMessage: ${(err as BusinessError).message}`);
+  }
+}
+```
+
+**客户端示例代码**：
+
+```typescript
+function connectSppServer(deviceId: string): void {
+  let sppOption: socket.SppOptions = {
+    uuid: '00001101-0000-1000-8000-00805F9B34FB',
+    secure: true,
+    type: socket.SppType.SPP_RFCOMM
+  };
+  try {
+    socket.sppConnect(deviceId, sppOption, (err: BusinessError, clientSocket: number) => {
+      if (err) {
+        console.error(`sppConnect errCode: ${err.code}, errMessage: ${err.message}`);
+        return;
+      }
+      clientSocketId = clientSocket;
+      socket.on('sppRead', clientSocketId, (dataBuffer: ArrayBuffer) => {
+        let data: Uint8Array = new Uint8Array(dataBuffer);
+        console.info(`收到数据长度: ${data.byteLength}`);
+      });
+      // 向服务端发送数据
+      let arrayBuffer = new ArrayBuffer(8);
+      let data = new Uint8Array(arrayBuffer);
+      data[0] = 0x01;
+      socket.sppWrite(clientSocketId, arrayBuffer);
+    });
+  } catch (err) {
+    console.error(`errCode: ${(err as BusinessError).code}, errMessage: ${(err as BusinessError).message}`);
+  }
+}
+```
+
+**关键注意事项**：
+
+- `sppWrite` 客户端和服务端均可使用，但必须在连接成功后调用才有效<rsub ref="G.1.9">16</rsub>。
+- 数据通道在 5-7 秒无数据交互时会进入休眠模式，下次发送前需约 500ms 退出休眠；如需低延迟，建议每 3 秒左右发送一次心跳数据保活，但这会增加功耗<rsub ref="G.1.7">1</rsub>。
+- 若需要感知传输过程中的异常断连，建议使用 API 18+ 的 `sppWriteAsync`/`sppReadAsync` 替代同步写和事件订阅读，同一连接两者不可混用<rsub ref="G.5.2">5</rsub>。
+- RFCOMM 链路接收数据超过 1024 字节时会自动分多次接收，每次接收范围为 [1, 1024] 字节<rsub ref="G.5.1">4</rsub>。
+
+### 三、GATT 服务端与客户端（ble 模块）
+
+**原理与适用场景**：GATT 采用"服务（Service）-特征值（Characteristic）"的层级模型，服务端注册服务供客户端发现和读写，是 BLE 最主流的通信方式。适合智能手环、体温计、血糖仪等低功耗、间歇性小数据量交互的设备。
+
+**GattService 结构**包含服务 UUID、是否主服务、特征值列表等字段<rsub ref="G.5.6">8</rsub>；`GattServer` 实例通过 `ble.createGattServer()` 创建，可操作添加服务、通知特征值变化等行为，并通过订阅 `on('connectionStateChange')` 事件感知连接状态和发起连接的客户端设备地址<rsub ref="G.2.8">7</rsub>。
+
+**GATT 服务端示例代码**：
+
+```typescript
+import { ble } from '@kit.ConnectivityKit';
+import { BusinessError } from '@kit.BasicServicesKit';
+
+let gattServer: ble.GattServer = ble.createGattServer();
+
+// 1. 构造特征值（含描述符，描述符常用于支持客户端订阅通知）
+let bufferDesc = new ArrayBuffer(8);
+let descriptors: Array<ble.BLEDescriptor> = [{
+  serviceUuid: '00001888-0000-1000-8000-00805f9b34fb',
+  characteristicUuid: '00001889-0000-1000-8000-00805f9b34fb',
+  descriptorUuid: '00002902-0000-1000-8000-00805f9b34fb',
+  descriptorValue: bufferDesc
+}];
+
+let bufferValue = new ArrayBuffer(8);
+let characteristic: ble.BLECharacteristic = {
+  serviceUuid: '00001888-0000-1000-8000-00805f9b34fb',
+  characteristicUuid: '00001889-0000-1000-8000-00805f9b34fb',
+  characteristicValue: bufferValue,
+  descriptors: descriptors
+};
+
+// 2. 构造服务并添加（addService 是直接调用的方法，不是事件）
+let gattService: ble.GattService = {
+  serviceUuid: '00001888-0000-1000-8000-00805f9b34fb',
+  isPrimary: true,
+  characteristics: [characteristic],
+  includeServices: []
+};
+try {
+  gattServer.addService(gattService);
+} catch (err) {
+  console.error(`errCode: ${(err as BusinessError).code}, errMessage: ${(err as BusinessError).message}`);
+}
+
+// 3. 订阅客户端的写请求，收到后必须及时调用 sendResponse 应答
+gattServer.on('characteristicWrite', (writeReq: ble.BLECharacteristic) => {
+  console.info(`客户端写入特征值: ${new Uint8Array(writeReq.characteristicValue).byteLength} 字节`);
+  let serverResponse: ble.ServerResponse = {
+    serviceUuid: writeReq.serviceUuid,
+    characteristicUuid: writeReq.characteristicUuid,
+    deviceId: writeReq.deviceId,
+    transId: writeReq.transId,
+    status: 0,
+    offset: writeReq.offset,
+    value: writeReq.characteristicValue
+  };
+  gattServer.sendResponse(serverResponse);
+});
+
+// 4. 主动向客户端推送数据（通知/指示）
+function notifyData(deviceId: string): void {
+  let buffer = new ArrayBuffer(4);
+  let data = new Uint8Array(buffer);
+  data[0] = 0x64;
+  let notifyCharacteristic: ble.NotifyCharacteristic = {
+    serviceUuid: '00001888-0000-1000-8000-00805f9b34fb',
+    characteristicUuid: '00001889-0000-1000-8000-00805f9b34fb',
+    characteristicValue: buffer
+  };
+  try {
+    gattServer.notifyCharacteristicChanged(deviceId, notifyCharacteristic, false);
+  } catch (err) {
+    console.error(`errCode: ${(err as BusinessError).code}, errMessage: ${(err as BusinessError).message}`);
+  }
+}
+```
+
+服务端收到客户端的读写/描述符请求后，必须及时调用 `sendResponse` 应答，否则客户端的后续请求会一直处于阻塞状态<rsub ref="G.5.8">14</rsub>。
+
+**GATT 客户端示例代码**：
+
+```typescript
+import { ble } from '@kit.ConnectivityKit';
+import { BusinessError } from '@kit.BasicServicesKit';
+
+// 通过扫描获取对端设备地址后创建客户端实例
+let gattClient: ble.GattClientDevice = ble.createGattClientDevice('XX:XX:XX:XX:XX:XX');
+
+// 订阅特征值变化（接收服务端通知的数据）
+gattClient.on('BLECharacteristicChange', (characteristicChangeReq: ble.BLECharacteristic) => {
+  let data: Uint8Array = new Uint8Array(characteristicChangeReq.characteristicValue);
+  console.info(`特征值变化，数据长度: ${data.byteLength}`);
+});
+
+// 发起 GATT 连接
+gattClient.connect();
+
+// 连接成功后进行服务发现
+gattClient.getServices((err: BusinessError, services: Array<ble.GattService>) => {
+  if (err) {
+    console.error(`getServices errCode: ${err.code}, errMessage: ${err.message}`);
+    return;
+  }
+  console.info(`服务发现完成，服务数量: ${services.length}`);
+});
+```
+
+`GattClientDevice` 提供与服务端连接和数据传输的方法，通过创建不同的实例可以管理多路 GATT 连接<rsub ref="G.2.6">9</rsub>。注意：`writeCharacteristicValue` 等接口要求前序非监听类接口（如 `getServices`、`setCharacteristicChangeNotification`）的回调完成后才能调用，否则会报 2900099 错误<rsub ref="G.4.4">15</rsub>。
+
+### 四、BLE 广播与扫描（ble 模块）
+
+**原理与适用场景**：广播是单向的"喊话"，用于让周围设备发现自己（常配合 GATT 服务端作为被连接方）；扫描是发现周边 BLE 设备（常配合 GATT 客户端作为连接发起方）。两者都不建立连接，功耗低。
+
+**广播示例代码**（API 11+ 推荐接口）：
+
+```typescript
+import { ble } from '@kit.ConnectivityKit';
+import { BusinessError } from '@kit.BasicServicesKit';
+
+let advHandle: number = -1;
+
+function startAdvertise(): void {
+  let manufactureValueBuffer = new Uint8Array(4);
+  manufactureValueBuffer[0] = 1;
+  manufactureValueBuffer[1] = 2;
+  manufactureValueBuffer[2] = 3;
+  manufactureValueBuffer[3] = 4;
+
+  let setting: ble.AdvertiseSetting = {
+    interval: 150,          // 广播间隔，单位 160ms
+    txPower: 0,             // 发射功率
+    connectable: true,      // 是否可连接
+    isExtended: false       // 是否为扩展广播
+  };
+  let manufactureDataUnit: ble.ManufactureData = {
+    manufactureId: 4567,
+    manufactureValue: manufactureValueBuffer.buffer
+  };
+  let advData: ble.AdvertiseData = {
+    serviceUuids: ['00001888-0000-1000-8000-00805f9b34fb'],
+    manufactureData: [manufactureDataUnit]
+  };
+  let advertisingParams: ble.AdvertisingParams = {
+    advertisingSettings: setting,
+    advertisingData: advData,
+    advertisingResponse: advData,  // 扫描响应报文
+    duration: 0                    // 0 表示持续广播
+  };
+  try {
+    ble.startAdvertising(advertisingParams, (err: BusinessError, outAdvHandle: number) => {
+      if (err) {
+        console.error(`startAdvertising errCode: ${err.code}, errMessage: ${err.message}`);
+        return;
+      }
+      advHandle = outAdvHandle;  // 记录广播 ID，停止时需要传入
+      console.info(`广播启动成功，advHandle: ${advHandle}`);
+    });
+  } catch (err) {
+    console.error(`errCode: ${(err as BusinessError).code}, errMessage: ${(err as BusinessError).message}`);
+  }
+}
+```
+
+`ble.startAdvertising`（API 11+）启动成功后蓝牙子系统会分配广播资源并返回广播 ID 标识；从 API 15 开始支持发起多路广播，每一路通过不同 ID 管理<rsub ref="G.1.1">10</rsub>。停止广播时需调用 API 11 版本的 `ble.stopAdvertising(advHandle)`，不要与 API 10 版本的无参 `stopAdvertising()` 混用<rsub ref="G.1.2">11</rsub>。
+
+**扫描示例代码**：
+
+```typescript
+import { ble } from '@kit.ConnectivityKit';
+
+function startScan(): void {
+  // 先订阅扫描结果上报事件
+  ble.on('BLEDeviceFind', (data: Array<ble.ScanResult>) => {
+    console.info(`扫描到设备: ${JSON.stringify(data)}`);
+  });
+  let scanFilter: ble.ScanFilter = {
+    serviceUuid: '00001888-0000-1000-8000-00805f9b34fb'  // 按服务 UUID 过滤
+  };
+  let scanOptions: ble.ScanOptions = {
+    interval: 500,
+    dutyMode: ble.ScanDuty.SCAN_MODE_LOW_POWER,
+    matchMode: ble.MatchMode.MATCH_MODE_AGGRESSIVE
+  };
+  try {
+    ble.startBLEScan([scanFilter], scanOptions);
+  } catch (err) {
+    console.error(`errCode: ${(err as BusinessError).code}, errMessage: ${(err as BusinessError).message}`);
+  }
+}
+```
+
+扫描结果通过 `ble.on('BLEDeviceFind')` 的回调获取，`startBLEScan` 只支持单路扫描，下一次调用前需先调用 `ble.stopBLEScan()` 停止上一次的扫描流程；若需要多路扫描，可使用 API 15+ 的 `BleScanner`<rsub ref="G.4.9">12</rsub>。当应用不再需要扫描时，需主动调用 `ble.stopBLEScan()` 停止，调用后不再收到扫描结果上报<rsub ref="G.4.8">13</rsub>。
+
+### 五、资源清理（对应你引用的最后一句）
+
+用完及时释放是正确习惯，但方法名需注意，完整的清理清单如下：
+
+```typescript
+// BLE 扫描清理：注意方法名是 stopBLEScan 而不是 stopScan
+ble.stopBLEScan();
+ble.off('BLEDeviceFind');
+
+// GATT 客户端清理
+gattClient.off('BLECharacteristicChange');
+gattClient.disconnect();
+gattClient.close();
+
+// GATT 服务端清理
+gattServer.off('characteristicWrite');
+gattServer.removeService('00001888-0000-1000-8000-00805f9b34fb');
+
+// 广播清理（API 11+ 传入广播 ID）
+ble.stopAdvertising(advHandle);
+
+// SPP 套接字清理
+socket.off('sppRead', clientSocketId);
+socket.sppCloseClientSocket(clientSocketId);
+socket.sppCloseServerSocket(serverSocketId);
+```
+
+### 六、推荐使用哪种方式
+
+**优先推荐 BLE GATT**，理由如下：
+
+1. **功耗**：BLE 从协议层就是为低功耗设计，穿戴、传感器类设备电池续航通常以月/年计，经典蓝牙做不到。
+2. **生态**：当前主流智能硬件（手环、体重秤、心率带、智能家居配件）几乎都实现了标准 GATT 服务，对接成本最低。
+3. **角色灵活**：手机侧做客户端（连接手环读数据）或做服务端（被电脑/平板连接传数据）都很方便。
+
+**选择 SPP 的场景**：对端是只支持经典蓝牙的老设备（串口打印机、OBD 检测仪、HC-05 之类透传模块），或需要持续传输较大数据量且对功耗不敏感。
+
+**选择广播的场景**：只需要"被周围设备发现"而不建立连接（如设备配网前的握手信标），或作为 GATT 服务端被连接前的"自我介绍"。
+
+**关于 A2DP**：它是音频传输协议，与 SPP/GATT 属于不同层面，HarmonyOS 中通过专门的音频协议模块（如 `@ohos.bluetooth.a2dp`）使用，连接管理由系统负责，应用一般不直接操作其连接过程。
+
+**权限提醒**：以上 BLE 与 SPP 接口均需在 `module.json5` 中声明 `ohos.permission.ACCESS_BLUETOOTH` 权限（系统授权，无需用户弹窗确认）；若广播中使用 `AdvertiseData` 的 `advertiseName` 字段自定义广播名称，还需额外申请 `ohos.permission.MANAGE_BLUETOOTH_ADVERTISER_NAME` 权限<rsub ref="G.1.1">10</rsub>。另外，上述接口均要求蓝牙已开启，若蓝牙未开启会返回 2900003 错误码，建议调用前先检查蓝牙状态。
+内容由 AI 生成，仅供参考
+
+
 
 ### 7.3 相机（@kit.CameraKit）
 
@@ -2770,7 +3050,7 @@ import { common } from '@kit.AbilityKit';
 
 // 预览面：XComponent 提供 surfaceId
 @Entry
-@Component
+@ComponentV2
 struct CamPage {
   ctl: XComponentController = new XComponentController();
   surfaceId: string = '';
@@ -3014,7 +3294,7 @@ import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 
 @Entry
-@Component
+@ComponentV2
 struct Index {
   context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
   requestPaymentPromise() {
@@ -3100,12 +3380,12 @@ ui/state-management/arkts-create-custom-components.md` 与 `arkts-declarative-ui
 - `struct` **不支持继承**，`new` 可省略；不能写 `constructor`，成员用默认值或父组件传参初始化。
 
 ```ts
-@Component
+@ComponentV2
 struct Card {
   // 状态与参数
-  @Prop title: string = '';
-  @Link expanded: boolean;
-  @Require onTap: (id: number) => void;      // @Require：父组件必须传
+  @Param title: string = '';
+  @Param expanded: boolean = false;
+  @Event onTap: (id: number) => void = () => {};   // 组件输出
   private id: number = 0;                     // 普通成员：改了不刷新 UI
 
   @Builder Label(text: string) {               // 成员 @Builder，可访问 this
@@ -3134,19 +3414,19 @@ struct Card {
 
 | 现象 | 原因方向 |
 | --- | --- |
-| UI 不刷新 | 变量没加装饰器 / 改的是嵌套第二层（V1 只看第一层）/ `ForEach` key 未变 |
+| UI 不刷新 | 变量没加装饰器 / 嵌套属性未加 `@Trace` / `ForEach` key 未变 |
 | `'xxx' is not assignable to type ...` | ArkTS 拒绝 `any`/`object`/结构类型，补显式 interface |
 | `build() 内不允许 ...` | 把逻辑挪到成员函数或 `aboutToAppear` |
 | 页面白屏 | `main_pages.json` 未登记 / `windowStage.loadContent` 路径写错 |
 | 权限申请无弹窗 | 未声明 `reason`/`usedScene`；或曾被拒绝需 `requestPermissionOnSetting` |
-| 长列表卡顿 | 用 `LazyForEach`/`Repeat` + `@Reusable`；避免每项重建大子树 |
+| 长列表卡顿 | 用 `LazyForEach`/`Repeat` + `@ReusableV2`；避免每项重建大子树 |
 | 图片不显示 | `$r('app.media.x')` 名字与文件后缀不符 / rawfile 路径以 `/` 开头 / uri 未授权 |
 
 ### 8.5 给前端同学的学习路径
 
-1. **先跑通一个页面**：`@Entry` + `Column/Text/Button` + `@State`，理解「改数据 → UI 变」。
+1. **先跑通一个页面**：`@Entry` + `Column/Text/Button` + `@Local`，理解「改数据 → UI 变」。
 2. **补 ArkTS 语言差异**：读 `typescript-to-arkts-migration-guide.md` 的限制清单，改掉 `any`/动态属性习惯。
-3. **状态管理是分水岭**：把 V1 的 `@State/@Prop/@Link/@Provide/@Observed+@ObjectLink` 与 V2 的 `@ObservedV2/@Trace/@Local/@Param/@Computed/@Monitor` 对照 Vue3 的 `ref/reactive/props/inject/computed/watch` 各写一遍小 demo。
+3. **状态管理是分水岭**：把 V2 的 `@Local/@Param/@Event/@Provider/@Consumer/@ObservedV2+@Trace/@Computed/@Monitor` 对照 Vue3 的 `ref/reactive/props/inject/computed/watch` 各写一遍小 demo。
 4. **布局与长列表**：`Row/Column/Stack/Flex` → `List + LazyForEach` → `Grid/WaterFlow`。
 5. **导航**：直接学 Navigation + NavPathStack，别在 Router 上花时间（大面积 deprecated）。
 6. **系统能力**：一律先问「有没有 Picker / 安全组件可以免权限」，再考虑申请权限。
@@ -3171,15 +3451,15 @@ struct Card {
 | `media query` | `@kit.ArkUI` 的 `mediaquery`（`matchMediaSync`）+ `GridRow/GridCol` 断点 + 分栏模式 | 断点驱动布局重排是系统设计目标，不只为字号 |
 | `v-if` / `{cond && ...}` | `build()` 里的 `if/else`（渲染控制） | 只在状态变量变化时决定挂载/卸载 |
 | `v-for` / `map()` | `ForEach(arr, itemBuilder, keyBuilder)` | key 决定复用；大列表必须换 `LazyForEach` 或 `Repeat` |
-| `ref()` / `useState` | `@State`（V1）/ `@Local`（V2） | 只能观察第一层（V1）；V2 靠 `@Trace` 深度观察 |
-| `props`（单向） | `@Prop`（单向，本地可改但会被父覆盖）/ V2 `@Param`（严格只读） | V2 明确区分 `@Param` 与 `@Event` |
-| `v-model` / 受控组件 | `@Link`（V1 双向）/ `!!` 或 `@Param`+`@Event`（V2） | `@Link` 禁止本地初始化 |
-| `provide` / `inject` | `@Provide` / `@Consume`（按 key 匹配）/ V2 `@Provider`/`@Consumer` | 靠别名/类型匹配，跨任意层级 |
-| `computed` | V1 无（用 getter）/ V2 `@Computed` | `@Computed` 只在依赖变化时重算 |
-| `watch` | `@Watch('cb')`（V1）/ `@Monitor`（V2，可监听嵌套路径） | V1 拿不到旧值，V2 回调带 `IMonitorValue` |
-| Pinia / Redux / 全局 store | `AppStorage`（应用级）/ `LocalStorage`（页面级）/ V2 `AppStorageV2` / `PersistenceV2`（落盘） | 状态管理只能在主线程；跨页面共享用 `@StorageLink` 或传入 `class` |
+| `ref()` / `useState` | `@Local` | 类属性需加 `@Trace` 才能深度观察 |
+| `props`（单向） | `@Param`（严格只读） | 明确区分 `@Param` 输入与 `@Event` 输出 |
+| `v-model` / 受控组件 | `!!` 或 `@Param`+`@Event` | 双向绑定由 `@Event` 显式写回 |
+| `provide` / `inject` | `@Provider` / `@Consumer` | 靠变量名/alias 匹配，跨任意层级 |
+| `computed` | `@Computed` | 只在依赖变化时重算 |
+| `watch` | `@Monitor`（可监听嵌套路径） | 回调带 `IMonitor`，可读取变化前后的值 |
+| Pinia / Redux / 全局 store | `AppStorageV2`（应用级共享）/ `PersistenceV2`（落盘） | 状态管理只能在主线程；共享对象需是 class |
 | DOM diff / 虚拟 DOM | 依赖收集 + 标脏 + 系统生成的 `rerender`，编译期生成创建/更新函数，单节点级按需更新 | 更新单位是自定义组件，因此组件粒度影响性能 |
-| 组件复用池 / key | `@Reusable`（V1，父组件级缓存池）/ `@ReusableV2` + 全局复用池 / `@Lazy`（懒加载） | 复用时必须在 `aboutToReuse` 里重新同步状态 |
+| 组件复用池 / key | `@ReusableV2` + 全局复用池 / `@Lazy`（懒加载） | 复用前框架自动重置组件内状态 |
 | `useEffect` 生命周期 / `mounted` | `aboutToAppear` / `onDidBuild` / `aboutToDisappear` / `onAppear` / `onDisAppear` | 复用组件走 `aboutToReuse` / `aboutToRecycle` |
 | React Router / Vue Router | **Navigation**（`NavPathStack` + `NavDestination`）为主；`Router`（页面级，大面积 deprecated） | Navigation 是组件级路由，支持分栏、系统返回、转场接管 |
 | History API `pushState` | `pathStack.pushPath({name, param})` / `pushDestination` / `pop` / `replacePath` | 栈对象与 Navigation 一一对应，不可复用 |
@@ -3187,7 +3467,7 @@ struct Card {
 | PWA / 快捷指令 / App Intents | **Insight Intent**（`@InsightIntentEntry` 等 + `insight_intent.json`） | 由系统入口（小艺建议、搜索、意图面板）拉起 |
 | Service Worker / 后台任务 | `ContinuousTask`（长时任务）/ `WorkScheduler`（延迟异步任务）/ `ServiceExtensionAbility` | 后台受限，需声明 `backgroundTaskManager` 的 `reason`/能力 |
 | `Web Worker` / 线程 | `@kit.ArkTS` 的 `taskpool`（`@Concurrent`）/ `Worker` | `@Concurrent` 函数只能定义在顶层，跨线程传值有类型限制 |
-| `alert` / `confirm` | `AlertDialog` / `promptAction.showToast/showDialog` / `CustomDialogController`（V1）/ `promptAction.openCustomDialog`（V2） | 系统弹窗与页面级 `bindSheet`/`bindContentCover` 分层 |
+| `alert` / `confirm` | `AlertDialog` / `promptAction.showToast/showDialog` / `promptAction.openCustomDialog` | 系统弹窗与页面级 `bindSheet`/`bindContentCover` 分层 |
 | `input type=file` | `DocumentViewPicker`（文件）、`PhotoViewPicker`（相册）、`SaveButton`（免权限保存）、`cameraPicker`（拍照） | 走 Picker 可完全免权限，是官方推荐路径 |
 | CSS transition / `@vue/transitions` | `.animation()`（属性动画）、`animateTo`（显式）、`transition(TransitionEffect)`（进出场）、`geometryTransition`（共享元素）、`customNavContentTransition`（导航转场） | 无 keyframes 字符串；曲线用 `Curve` 枚举与 `curves.springMotion` |
 | 权限 API（浏览器弹窗） | `module.json5` 静态声明 + `abilityAccessCtrl.requestPermissionsFromUser` | 拒绝后不再自动弹窗，需引导设置页 |
@@ -3201,7 +3481,6 @@ struct Card {
 
 ```ts
 // entry/src/main/ets/model/Item.ets —— 数据模型（第三章：@ObservedV2 + @Trace）
-import { ObservedV2, Trace } from '@kit.ArkUI';   // V2 装饰器由状态管理提供
 
 @ObservedV2
 export class Item {
@@ -3282,7 +3561,7 @@ struct ListPage {
                 }
                 Column({ space: 4 }) {
                   Text(item.name).fontSize(16).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                  Stepper2({ item: item })          // 子组件用 @Param 接收引用（第三章 V2）
+                  Stepper2({ item: item })          // 子组件用 @Param 接收引用（第三章 3.4）
                 }
                 .alignItems(HorizontalAlign.Start)
                 .layoutWeight(1)
@@ -3308,7 +3587,7 @@ struct ListPage {
   }
 }
 
-// 数量步进器：V2 的 @Param + @Event 组合（第三章 4.3）
+// 数量步进器：V2 的 @Param + @Event 组合（第三章 3.4）
 @ComponentV2
 struct Stepper2 {
   @Require @Param item: Item;
@@ -3346,7 +3625,7 @@ import { paymentService } from '@kit.PaymentKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 
 @Entry
-@Component
+@ComponentV2
 struct CheckoutPage {
   aboutToAppear(): void {
     // 页面级数据可从路由参数拿：
