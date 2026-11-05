@@ -7,7 +7,6 @@ export const nav: DefaultTheme.NavItem[] = [
   { text: "Rust 中高级", link: "/rust-lang/" },
   { text: "Rust 前端工具链", link: "/rust-tools/" },
   { text: "WebGPU 进阶", link: "/webgpu/" },
-  { text: "Godot 4.x", link: "/godot/" },
 ];
 
 /** 侧栏：纯 VitePress 嵌套结构，手写维护 */
@@ -109,6 +108,11 @@ export const sidebar: DefaultTheme.Sidebar = {
         { text: "arkts 入门", link: "/harmonyOS/learn-arkts" },
         { text: "arkui 入门", link: "/harmonyOS/learn-arkui" },
       ],
+    },
+    {
+      text: "语音AI",
+      collapsed: true,
+      items: [{ text: "千问实时语音库", link: "/audio-llm/qwen-audio-agent" }],
     },
   ],
 };
