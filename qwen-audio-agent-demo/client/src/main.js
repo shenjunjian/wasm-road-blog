@@ -235,6 +235,7 @@ function handleStatus(status) {
 }
 
 function handleEvent(event) {
+  // 语音通道已就绪：记录服务端要求的输入采样率，后续麦克风数据按它转换。
   if (event.type === GatewayServerEvent.VOICE_READY) {
     inputSampleRate = event.inputSampleRate || inputSampleRate
     log('voice.ready', {
@@ -244,12 +245,14 @@ function handleEvent(event) {
     return
   }
 
+  // 收到一段 Base64 PCM16 音频增量：按 responseId 排队播放。
   if (event.type === GatewayServerEvent.AUDIO_DELTA) {
     playPcm16(event.audio, event.sampleRate, event.responseId)
       .catch(error => log('playback.error', error.message))
     return
   }
 
+  // 当前回复的音频已全部下发：等已排队的音频播放完后结束这一轮播放。
   if (event.type === GatewayServerEvent.AUDIO_DONE) {
     const record = playback.get(event.responseId)
     if (record) {
@@ -259,51 +262,61 @@ function handleEvent(event) {
     return
   }
 
+  // 用户或助手转写的增量片段：追加到对应角色的当前文本行。
   if (event.type === GatewayServerEvent.TRANSCRIPT_DELTA) {
     appendTranscript(event.role, event.content)
     return
   }
 
+  // 转写最终结果：用最终文本替换当前角色的临时内容。
   if (event.type === GatewayServerEvent.TRANSCRIPT_FINAL) {
     finishTranscript(event.role, event.content)
     return
   }
 
+  // 丢弃未完成的转写：通常发生在插话或该轮被新回复取代时。
   if (event.type === GatewayServerEvent.TRANSCRIPT_DISCARD) {
     discardTranscript(event.role)
     return
   }
 
+  // 当前回复被用户打断：只停止这个 responseId 对应的音频。
   if (event.type === GatewayServerEvent.RESPONSE_INTERRUPTED) {
     stopPlayback(event.responseId, 'response.interrupted')
     return
   }
 
+  // 服务端要求清空播放队列：停止所有正在播放或排队中的音频。
   if (event.type === GatewayServerEvent.PLAYBACK_CLEAR) {
     stopAllPlayback(event.reason || 'playback.clear')
     return
   }
 
+  // 后台智能体的活动状态：最小示例只记录日志，可在这里展示执行进度。
   if (event.type === GatewayServerEvent.AGENT_ACTIVITY) {
     log('agent.activity', event.activity)
     return
   }
 
+  // 网关或底层运行时错误：记录错误，实际应用可在这里提示用户。
   if (event.type === GatewayServerEvent.ERROR) {
     log('gateway.error', event.message || event)
     return
   }
 
+  // 后端请求权限：演示用 stub 不实现授权流程，仅记录请求内容。
   if (event.type === GatewayTaskEvent.PERMISSION_REQUESTED) {
     log('task.permission.requested', event.permission)
     return
   }
 
+  // 后端请求补充输入：演示用 stub 不支持交互式追问，仅记录请求内容。
   if (event.type === GatewayTaskEvent.INPUT_REQUESTED) {
     log('task.input.requested', event.input)
     return
   }
 
+  // 任务生命周期或进度事件（task.accepted、task.running、task.completed 等）：提取关键字段记录。
   if (event.type.startsWith('task.')) {
     log(event.type, event.task ? {
       id: event.task.id,
@@ -313,8 +326,10 @@ function handleEvent(event) {
     return
   }
 
+  // 未识别的事件：原样记录，便于排查协议扩展或新增事件。
   log(event.type, event)
 }
+
 
 const client = new GatewayClient({
   url: `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/realtime?sessionId=demo`,
