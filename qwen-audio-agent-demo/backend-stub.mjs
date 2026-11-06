@@ -52,7 +52,7 @@ export const stubBackendAdapter = defineBackendAdapter({
           id: `stub-${work.id}`,
           kind: "status",
           status: "running",
-          label: "Demo 后台正在执行",
+          label: "Demo 后台正在模拟执行",
           detail: work.instruction,
         },
       }),
@@ -60,7 +60,7 @@ export const stubBackendAdapter = defineBackendAdapter({
 
     await delay(1200, signal);
 
-    const content = `后台已收到任务并完成。原始要求：${work.instruction}`;
+    const content = `后台已收到任务并模拟完成。原始要求：${work.instruction}`;
     console.log(`[stub-backend] completed: ${content}`);
     return {
       content,
