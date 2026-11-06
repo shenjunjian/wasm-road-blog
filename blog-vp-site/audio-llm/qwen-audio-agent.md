@@ -104,7 +104,76 @@ Gateway 做的是“把运行时装配成一个可连接的服务”：
 
 它不承载业务逻辑。客服、座舱、数字人这些场景的提示词、工具和业务状态，应该留在示例或业务宿主里，而不是塞进 Gateway。
 
-### 2.5 客户端：I/O 与环境入口
+### 2.5 最小可运行装配：一个 Gateway + 一个后台 Agent
+
+先给一个最小但完整的服务端骨架。它没有 fork 仓库，也没有手写 WebSocket；运行时、Task、权限和协议都来自公开包：
+
+```js
+// server.mjs
+import { createGatewayApplication } from 'qwen-audio-agent/gateway-application'
+import { createBackendAgentHost } from 'qwen-audio-agent/backend-adapter-sdk'
+import { createA2ABackendAdapter } from 'qwen-audio-agent/a2a-backend-adapter'
+
+if (!process.env.MY_AGENT_CARD_URL) {
+  throw new Error('MY_AGENT_CARD_URL is required')
+}
+
+const backend = createA2ABackendAdapter({
+  agentCardUrl: process.env.MY_AGENT_CARD_URL,
+  token: process.env.MY_AGENT_TOKEN,
+  label: 'My Agent',
+  reuseContext: true,
+})
+
+const agent = createBackendAgentHost(backend, { name: 'My Agent' })
+const gateway = createGatewayApplication({ agent, autoStart: false })
+
+const server = gateway.start({
+  host: process.env.GATEWAY_HOST || '127.0.0.1',
+  port: Number(process.env.GATEWAY_PORT) || 3101,
+})
+
+server.once('listening', () => {
+  const { address, port } = server.address()
+  console.log(`Gateway: http://${address}:${port}`)
+})
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.once(signal, async () => {
+    await gateway.close()
+    process.exit(0)
+  })
+}
+```
+
+```bash
+node server.mjs
+# Gateway: http://127.0.0.1:3101
+```
+
+`createGatewayApplication` 同时做了三件事：把 `agent` 放进 `BackendWorkRuntime`，创建 TaskManager / PermissionPolicy / Session Journal，再挂上 Realtime 与 WebSocket 入口。所以这里没有 `createFrontendAgent()` 之类的公开构造器：**前台 Agent 是 Realtime Provider、Prompt/Profile 和工具源在会话建立时装配出来的**（见第四章、第六章）。
+
+服务启动后，WebUI、TUI、桌面端或自定义 `GatewayClient` 连接 `ws://127.0.0.1:3101/api/realtime`。只想聊天、暂时不要后台时，设置 `AGENT_PROTOCOL=none`，前台和前台工具仍然可用。
+
+下面是本章及后续示例会用到的公开导入入口。qwen-audio-agent 的包入口决定了哪些能力可以稳定依赖；不要从 `server/src/...` 这类内部路径导入。
+
+| 包入口 | 主要导出 | 用途 |
+| --- | --- | --- |
+| `qwen-audio-agent/gateway-application` | `createGatewayApplication` | 装配 Gateway、运行时、HTTP/WebSocket 入口 |
+| `qwen-audio-agent/backend-adapter-sdk` | `createBackendAgentHost`、`defineBackendAdapter`、`backendEvent`、`BackendEventType`、`verifyBackendAdapterConformance` | 实现和校验 `BackendPort` |
+| `qwen-audio-agent/a2a-backend-adapter` | `createA2ABackendAdapter` | 把远程 A2A Agent 接到 Gateway |
+| `qwen-audio-agent/realtime-provider` | `createRealtimeProviderRegistry`、`defineRealtimeProvider` | 注册和校验实时语音 Provider |
+| `qwen-audio-agent/gateway-client-sdk` | `GatewayClient` | 浏览器、Node、TUI、硬件共用客户端 |
+| `qwen-audio-agent/gateway-client-protocol` | `GatewayClientProtocolEvent`、`GatewayClientCapability`、`GATEWAY_CLIENT_PROTOCOL_VERSION` | GCP 7.0 命令名、能力名和版本 |
+| `qwen-audio-agent/realtime-events` | `GatewayClientEvent`、`GatewayServerEvent`、`GatewayTaskEvent` | 服务端事件和 Task 生命周期常量 |
+| `qwen-audio-agent/gateway-events` | `GatewayClientMessageSchema`、`parseGatewayClientMessage` | 消息 Schema 与解析 |
+| `qwen-audio-agent/gateway-client-state` | `createGatewayClientState`、`reduceGatewayClientState` | 客户端状态 reducer |
+| `qwen-audio-agent/agent-delivery` | `createAgentDelivery` | 构造上下文或回复投递 |
+| `qwen-audio-agent/memory-provider`、`qwen-audio-agent/knowledge-provider` | Provider 契约与工具 | 可选记忆、知识扩展 |
+
+能力名和协议命令不要硬编码成字符串。客户端代码里应优先使用 `GatewayClientCapability.*`、`GatewayClientProtocolEvent.*` 和 `GatewayServerEvent.*`，这样升级时更容易发现不兼容点。
+
+### 2.6 客户端：I/O 与环境入口
 
 客户端负责收音、播放、转写展示、任务卡片、窗口、唤醒词、快捷键、本地设备和环境事件。它不等于前台 Agent，也不拥有模型会话。
 
@@ -153,7 +222,82 @@ sequenceDiagram
 - function calling 是“同一轮里等工具结果”；
 - `spawn_thinking` 是“把工作变成一个有空生命周期的 Task”，对话先继续。
 
-### 3.2 任务准入：有界队列，而不是无限并发
+### 3.2 创建一个 Task：语音路径与显式命令
+
+Task 有两条创建路径，语义不同：
+
+| 入口 | 谁触发 | 适用场景 |
+| --- | --- | --- |
+| `spawn_thinking` | 前台实时模型 | 正常语音对话中，模型判断“需要实际执行”后自动创建 |
+| `task.create` | 客户端或宿主 | 按钮、表单、外部系统、自动化测试等明确要求创建，不经过模型路由 |
+
+前台模型实际发起的工具调用形如：
+
+```json
+{
+  "name": "spawn_thinking",
+  "arguments": {
+    "objective": "检查项目并生成 README，保留现有构建命令"
+  }
+}
+```
+
+`spawn_thinking` 只返回受理回执和 `task_id`，不会等待后台执行完。任务完成后的结果由运行时在安全窗口注入回前台。
+
+如果客户端要自己创建 Task，可以在已就绪的 `GatewayClient` 上调用运行时命令：
+
+```js
+import { GatewayClientProtocolEvent } from 'qwen-audio-agent/gateway-client-protocol'
+
+const { task } = await client.request(GatewayClientProtocolEvent.TASK_CREATE, {
+  message: {
+    parts: [
+      { type: 'text', text: '检查项目并生成 README，保留现有构建命令' },
+    ],
+  },
+})
+
+console.log(task.id, task.status)
+```
+
+`request()` 会自动生成 `event_id`，并等待带对应 `request_event_id` 的 `task.create.result`。线协议上等价于：
+
+```json
+{
+  "type": "task.create",
+  "event_id": "evt_client_01",
+  "message": {
+    "parts": [
+      { "type": "text", "text": "检查项目并生成 README，保留现有构建命令" }
+    ]
+  }
+}
+```
+
+`message.parts` 与普通用户输入使用同一套 `text` / `file` 片段，最多 16 个，所以附件可以随任务一起提交。
+
+Task 建好之后，生命周期仍通过服务端推送到达，不会藏在命令结果里：
+
+```text
+task.accepted → task.running → ... → task.completed
+                              ↘ task.failed
+                              ↘ task.cancelled
+```
+
+需要调整仍在执行的 Task 时，用 `task.update`：
+
+```js
+await client.request(GatewayClientProtocolEvent.TASK_UPDATE, {
+  task_id: task.id,
+  message: {
+    parts: [{ type: 'text', text: '顺便把示例命令也写上' }],
+  },
+})
+```
+
+`task.create` 适合显式集成，但不替代正常语音路径。保留 `spawn_thinking`，才能让前台模型判断该直接回答、该追问，还是该创建工作。
+
+### 3.3 任务准入：有界队列，而不是无限并发
 
 Task 被受理后进入有界队列。默认情况下，全局和每个 owner 各有一个活动名额；名额被占用时，后续请求排队。
 
@@ -164,7 +308,7 @@ Task 被受理后进入有界队列。默认情况下，全局和每个 owner �
 
 ACP 后台还有自己的协调 Session 机制：协调轮次负责分派和整理结果，项目 Session 可以独立执行。任务准入上限不会创建额外的协调 Session，也不限制独立项目 Session 的数量。A2A 或自定义后台不要求采用同样的 Session 结构。
 
-### 3.3 Task 状态：交付回执，不是后台任务图的镜像
+### 3.4 Task 状态：交付回执，不是后台任务图的镜像
 
 Task 的公共状态大致是：
 
@@ -182,7 +326,7 @@ queued → running ────────────────────�
 - 后台的 Session ID、子 Agent ID、原始权限载荷、执行拓扑，不进入公共 Task；
 - 排队中和直接执行中的 Task 在 Gateway 重启后无法安全恢复，会明确失败；委派 Task 只有在 Adapter 能确认持久化 Session 时才重新挂接。
 
-### 3.4 结果交付：等一个安全的插入窗口
+### 3.5 结果交付：等一个安全的插入窗口
 
 后台完成后，结果不会立刻硬插进语音里。运行时会等待一个安全的双工插入窗口：
 
@@ -216,6 +360,163 @@ queued → running ────────────────────�
 唯一的例外是 `respond_permission`：它只能转发当前轮次用户对某个待确认权限的明确决定，不能在没有用户话语的情况下虚构同意，也不能修改后台的权限策略。
 
 这个设计的意义是：**模型可以理解意图，但不能拥有基础设施的控制权。** 权限、路由、Task 生命周期和后台 Session 都由运行时管理，不依赖模型“遵守提示词”。
+
+### 4.1 前台 Agent 由什么装配
+
+`createGatewayApplication()` 没有“创建一个前台 Agent”的公开构造器。前台 Agent 是下面几类输入在 Realtime 会话建立时合成的：
+
+1. **Realtime Provider**：决定上游模型、URL、认证、音色、采样率，以及 `session.update` 里放什么 instructions 和 tools；
+2. **Prompt / Profile**：固定核心提示词 + `ASSISTANT.md` 人设 + 用户偏好、记忆、近期对话；
+3. **工具面**：核心 Task 工具 + 可选能力 + MCP/OpenAPI + `frontendToolSources` + 客户端工具。
+
+因此，构建前台 Agent 通常只需要三步：选 Provider、写人设、按需加工具。只有上游语音协议本身不兼容时，才需要写 Provider。
+
+最常用的服务端配置如下（写入 Gateway 的 `config.env`，不是浏览器代码）：
+
+```dotenv
+QWEN_AUDIO_REALTIME_PROVIDER=dashscope
+QWEN_AUDIO_REALTIME_API_KEY=sk-...
+QWEN_AUDIO_REALTIME_MODEL=qwen-audio-3.1-realtime-plus
+QWEN_AUDIO_REALTIME_VOICE=
+QWEN_AUDIO_REALTIME_URL= 
+
+# 先只运行前台，不接后台 Agent
+AGENT_PROTOCOL=none
+# 可选：替换默认人设
+QWEN_AUDIO_AGENT_ASSISTANT_PROFILE_PATH=/absolute/path/to/ASSISTANT.md
+```
+
+| 字段 | 含义 |
+| --- | --- |
+| `QWEN_AUDIO_REALTIME_PROVIDER` | Provider key，默认 `dashscope` |
+| `QWEN_AUDIO_REALTIME_API_KEY` | 当前语音服务的凭据，只保存在 Gateway 侧 |
+| `QWEN_AUDIO_REALTIME_MODEL` | 模型 ID；留空使用 Provider 默认模型 |
+| `QWEN_AUDIO_REALTIME_VOICE` | 音色；留空使用模型或服务默认音色，DashScope Audio 3.1 Plus 默认是 longanqian_v3.1，3.0 系列默认是 longanqian |
+| `QWEN_AUDIO_REALTIME_URL` | WebSocket 服务地址；留空使用 Provider 默认地址，DashScope 是 wss://dashscope.aliyuncs.com/api-ws/v1/realtime |
+| `QWEN_AUDIO_AGENT_ASSISTANT_PROFILE_PATH` | 人设文件路径，不包含工具或密钥 |
+| `QWEN_AUDIO_FRONTEND_PROFILE` | 可选的 Frontend Profile 入口，打包人设和 MCP/OpenAPI 配置 |
+
+常见 Provider 的默认值：
+
+| Provider | 默认模型 | 默认地址 |
+| --- | --- | --- |
+| `dashscope` | `qwen-audio-3.1-realtime-plus` | `wss://dashscope.aliyuncs.com/api-ws/v1/realtime` |
+| `stepfun` | `stepaudio-3-realtime-preview` | `wss://api.stepfun.com/v1/realtime` |
+| `gpt-live` | `gpt-realtime-2.1` | `wss://api.openai.com/v1/realtime` |
+| `google-live` | `gemini-3.8-live` | `wss://generativelanguage.googleapis.com/ws/...` |
+| `doubao-seeduplex` | `1.2.6.1` | `wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue` |
+| `speech-to-speech` | 由上游决定 | `ws://127.0.0.1:8765/v1/realtime` |
+| `minicpm-o` | 由上游决定 | `ws://127.0.0.1:8006/v1/realtime?mode=audio` |
+
+`QWEN_AUDIO_REALTIME_ENDPOINT`、`QWEN_AUDIO_REALTIME_BASE_URL` 等旧名字只作为兼容读取，不建议在新配置里使用。切换 Provider 时要同时替换 Key、模型、地址和音色，避免把上一家的凭据发给下一家。
+
+人设文件本身是普通 Markdown，例如：
+
+```md
+## Identity
+
+你叫“小舟”，是一个面向研发团队的语音助手。
+
+## Personality
+
+直接、可靠，不刻意讨好；不确定时先说明，再查证。
+
+## Conversation style
+
+先说结论，再补充必要细节。面向听觉表达，不朗读路径、URL 和内部 ID。
+```
+
+它只影响默认人格和表达风格，不能修改权限、路由、Task 或工具契约。真正的前台工具仍由运行时提供。
+
+**浏览器端不接收也不保存 `QWEN_AUDIO_REALTIME_API_KEY`。** 浏览器只知道 Gateway 的 `ws://` 或 `wss://` 地址；实时模型凭据始终留在 Gateway 进程。远程访问时，客户端最多持有 Gateway 的访问令牌，而不是上游模型 Key。
+
+### 4.2 给前台 Agent 加一个自己的工具
+
+如果某个能力低延迟、只读、结果小，例如查天气、查订单摘要、开关设备，适合放在前台。自定义工具源实现六个方法即可：
+
+```js
+// weather-tool-source.mjs
+export const weatherToolSource = {
+  describe: () => ({
+    key: 'weather-tools',
+    label: 'Weather Tools',
+  }),
+
+  async initialize() {},
+
+  tools: () => [{
+    name: 'get_weather',
+    policy: { maxResultBytes: 8_000 },
+    definition: {
+      type: 'function',
+      function: {
+        name: 'get_weather',
+        description: '查询指定城市的当前天气。只读、低延迟，不用于长期预报。',
+        parameters: {
+          type: 'object',
+          properties: {
+            city: {
+              type: 'string',
+              description: '城市名称，例如“杭州”。',
+            },
+          },
+          required: ['city'],
+          additionalProperties: false,
+        },
+      },
+    },
+  }],
+
+  async execute(name, args, context) {
+    if (name !== 'get_weather') {
+      throw new Error(`Unknown weather tool: ${name}`)
+    }
+    const url = new URL('https://api.example.com/weather')
+    url.searchParams.set('city', args.city)
+    const response = await fetch(url, { signal: context.signal })
+    if (!response.ok) throw new Error(`Weather service returned ${response.status}`)
+    const data = await response.json()
+    return {
+      status: 'completed',
+      city: args.city,
+      summary: data.summary,
+      temperatureC: data.temperatureC,
+    }
+  },
+
+  health: () => ({ ok: true }),
+
+  close() {},
+}
+```
+
+把它装进 Gateway：
+
+```js
+import { createGatewayApplication } from 'qwen-audio-agent/gateway-application'
+import { weatherToolSource } from './weather-tool-source.mjs'
+
+const gateway = createGatewayApplication({
+  frontendToolSources: [weatherToolSource],
+  spawnThinkingDescription: '把查文件、跑代码、写文件或需要多步执行的工作交给后台 Agent。',
+  autoStart: false,
+})
+
+gateway.start({ host: '127.0.0.1', port: 3101 })
+```
+
+`execute()` 的返回值会作为工具结果回填给实时模型，所以应当短、结构化、可序列化。长任务不要塞进前台工具：它应调用 `spawn_thinking` 创建 Task，或者把附件引用交给后台。
+
+如果工具来自标准服务，不需要写 `frontendToolSources`：
+
+```dotenv
+# 显式启用白名单里的 MCP 工具
+QWEN_AUDIO_FRONTEND_MCP_CONFIG=/absolute/path/to/frontend-mcp.json
+# 或者 OpenAPI 3.x
+QWEN_AUDIO_FRONTEND_OPENAPI_CONFIG=/absolute/path/to/frontend-openapi.json
+```
+
+MCP 工具的模型可见名称是 `mcp__<server>__<tool>`。完整配置格式见第九章的前台工具小节。
 
 ## 五、后台边界：BackendPort 与四种接入方式
 
@@ -264,6 +565,136 @@ A2A Adapter 更适合远程服务。它通过 Agent Card 发现、协议协商�
 
 后台服务归属和 ACP 连接方式是两个独立维度。比如 OpenClaw 可以是外部 Gateway 服务，但 ACP 连接仍然由本地 bridge 通过 stdio 完成。理解这一点，才能正确设计“桌面版内置 Gateway + 远程后台”的部署。
 
+### 5.3 最小 BackendPort Adapter
+
+下面这个 Adapter 把一个普通 HTTP Agent 接到 Gateway。它是完整可运行的形状，只实现 `submit`、`cancel` 和最小健康检查；权限、补充输入和调整工作暂时明确拒绝。
+
+```js
+// my-agent-adapter.mjs
+import {
+  BackendEventType,
+  backendEvent,
+  defineBackendAdapter,
+} from 'qwen-audio-agent/backend-adapter-sdk'
+
+const activeRuns = new Map()
+
+export const myAgentAdapter = defineBackendAdapter({
+  describe: () => ({
+    configured: Boolean(process.env.MY_AGENT_URL),
+    enabled: true,
+    protocol: 'my-http-agent',
+    label: 'My HTTP Agent',
+    capabilities: {
+      cancel: true,
+      workUpdates: false,
+      authorization: false,
+      inputRequests: false,
+    },
+  }),
+
+  async start() {
+    if (!process.env.MY_AGENT_URL) {
+      throw new Error('MY_AGENT_URL is required')
+    }
+  },
+
+  async health() {
+    return { ok: true, status: 'ready' }
+  },
+
+  async submit(work, { signal, onEvent } = {}) {
+    const controller = new AbortController()
+    const abort = () => controller.abort()
+    signal?.addEventListener('abort', abort, { once: true })
+    activeRuns.set(work.id, controller)
+
+    onEvent?.(backendEvent(BackendEventType.ACTIVITY, {
+      activity: {
+        id: 'remote-agent',
+        kind: 'status',
+        status: 'running',
+        label: '后台执行中',
+      },
+    }))
+
+    try {
+      const response = await fetch(process.env.MY_AGENT_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          instruction: work.instruction,
+          inputParts: work.inputParts,
+        }),
+        signal: controller.signal,
+      })
+      if (!response.ok) {
+        throw new Error(`My Agent returned ${response.status}`)
+      }
+      const result = await response.json()
+      return {
+        content: String(result.text || '').trim(),
+        artifacts: Array.isArray(result.artifacts) ? result.artifacts : [],
+      }
+    } finally {
+      signal?.removeEventListener('abort', abort)
+      activeRuns.delete(work.id)
+    }
+  },
+
+  async status() {
+    return { ok: true }
+  },
+
+  async cancel(taskId) {
+    activeRuns.get(taskId)?.abort()
+    return { ok: true }
+  },
+
+  async respondAuthorization() {
+    throw new Error('This backend does not support authorization requests')
+  },
+
+  async respondInput() {
+    throw new Error('This backend does not support input requests')
+  },
+
+  subscribe() {
+    return () => {}
+  },
+
+  async close() {
+    for (const controller of activeRuns.values()) controller.abort()
+    activeRuns.clear()
+  },
+})
+```
+
+装配方式与 A2A 完全相同：
+
+```js
+import { createGatewayApplication } from 'qwen-audio-agent/gateway-application'
+import { createBackendAgentHost } from 'qwen-audio-agent/backend-adapter-sdk'
+import { myAgentAdapter } from './my-agent-adapter.mjs'
+
+const agent = createBackendAgentHost(myAgentAdapter, {
+  name: 'My HTTP Agent',
+})
+
+const gateway = createGatewayApplication({ agent, autoStart: false })
+gateway.start({ host: '127.0.0.1', port: 3101 })
+```
+
+这个例子只覆盖“提交 → 返回 content”的最小闭环。生产实现还要处理：
+
+- `status` / `cancel` 与后台真实运行状态对齐；
+- 权限请求用 `backend.permission.requested` 发布，并实现 `respondAuthorization`；
+- 补充输入用 `backend.input.requested` 发布，并让 `submit` 等待同一次操作的 `respondInput`；
+- 调整工作声明 `capabilities.workUpdates` 并实现 `update`；
+- 用 `verifyBackendAdapterConformance` 跑一遍契约测试。
+
+完整的十方法实现和 conformance 测试见第九章 9.3。
+
 ## 六、语音边界：Realtime Provider
 
 Realtime Provider 是运行时与实时语音模型之间的适配器。它拥有自己的：
@@ -286,6 +717,162 @@ Gateway 只看到统一的实时事件，不关心上游是 Qwen Audio Realtime�
 不同 Provider 的能力并不完全一致。比如视觉输入、工具调用、原生续答、临时回复指令、会话恢复，各自的支持程度不同。Gateway 通过能力协商暴露这些差异，而不是假设“同一家 API 的所有模型都一样”。
 
 如果你要接入自己的语音模型，实现 Provider 契约并注册到 `createRealtimeProviderRegistry` 即可。任务、权限、客户端协议都不需要改。
+
+### 6.1 先配置，不要急着写 Provider
+
+如果只是换 Key、服务地址、模型或音色，优先使用配置。前端连接信息统一由五个字段描述：
+
+```dotenv
+QWEN_AUDIO_REALTIME_PROVIDER=dashscope
+QWEN_AUDIO_REALTIME_API_KEY=sk-...
+QWEN_AUDIO_REALTIME_MODEL=qwen-audio-3.1-realtime-plus
+QWEN_AUDIO_REALTIME_URL=
+QWEN_AUDIO_REALTIME_VOICE=
+```
+
+模型 ID 必须属于已注册目录。要追加一个与现有 API 预设兼容的模型，新建 `frontend-models.json`，不要直接写一个未登记的 ID：
+
+```json
+{
+  "providers": {
+    "dashscope": {
+      "models": {
+        "replace-with-supported-model-id": {
+          "api": "audio",
+          "label": "My Audio Model"
+        }
+      }
+    }
+  }
+}
+```
+
+```dotenv
+# 默认与 config.env 同目录；也可以指向绝对路径
+QWEN_AUDIO_FRONTEND_MODELS_CONFIG=/absolute/path/to/frontend-models.json
+```
+
+`api` 必须与现有接入预设兼容：DashScope 可用 `audio`、`omni`、`omni-v2`，其他 Provider 使用与自身 key 对应的 API。登记只扩展模型目录，不探测能力，也不能覆盖内置模型。音色兼容性仍由对应服务决定。
+
+### 6.2 注册自定义 Realtime Provider
+
+只有上游线协议与现有 Provider 不兼容时，才需要写 Provider。注册入口在 `qwen-audio-agent/realtime-provider`：
+
+```js
+import { createGatewayApplication } from 'qwen-audio-agent/gateway-application'
+import {
+  createRealtimeProviderRegistry,
+} from 'qwen-audio-agent/realtime-provider'
+import { myRealtimeProvider } from './my-realtime-provider.mjs'
+
+const realtimeProviderRegistry = createRealtimeProviderRegistry({
+  providers: [myRealtimeProvider],
+  defaultProvider: myRealtimeProvider.key,
+})
+
+const gateway = createGatewayApplication({
+  realtimeProviderRegistry,
+  realtimeProvider: myRealtimeProvider.key,
+  autoStart: false,
+})
+
+gateway.start({ host: '127.0.0.1', port: 3101 })
+```
+
+`my-realtime-provider.mjs` 必须用 `defineRealtimeProvider()` 包装，并实现完整契约：
+
+```js
+import { defineRealtimeProvider } from 'qwen-audio-agent/realtime-provider'
+
+export const myRealtimeProvider = defineRealtimeProvider({
+  key: 'my-realtime',
+  label: 'My Realtime',
+  inputSampleRate: 16000,
+  outputSampleRate: 24000,
+
+  model: () => process.env.MY_REALTIME_MODEL,
+  voice: () => process.env.MY_REALTIME_VOICE || null,
+  isConfigured: () => Boolean(
+    process.env.MY_REALTIME_URL && process.env.MY_REALTIME_API_KEY,
+  ),
+  url: () => process.env.MY_REALTIME_URL,
+  headers: () => ({
+    Authorization: `Bearer ${process.env.MY_REALTIME_API_KEY}`,
+  }),
+
+  // 必须把上游协议错误映射到运行时认识的分类。
+  classifyError(message) {
+    if (/unauthorized|forbidden/i.test(message)) return 'fatal'
+    if (/busy|queue full/i.test(message)) return 'capacity_busy'
+    return 'other'
+  },
+
+  // 由 Provider 决定上游 session 的形状。
+  buildSession: ({ agentContext }) => ({
+    // 必须复用与当前 Gateway 版本一致的前台 instructions 和核心 tools。
+    // agentContext.frontend.tools 只含自定义工具源与客户端工具，
+    // 不含 spawn_thinking 等内置核心工具，不能当作完整工具面。
+    instructions: buildMyFrontendInstructions(agentContext),
+    tools: [
+      ...buildMyCoreFrontendTools(agentContext),
+      ...(agentContext?.frontend?.tools || []),
+    ],
+    voice: process.env.MY_REALTIME_VOICE || undefined,
+  }),
+
+  buildSpeakResponse: content => ({ instructions: content }),
+  buildResultInjection: content => ({
+    item: { role: 'user', content },
+    response: {},
+  }),
+  buildPermissionInjection: permission => ({
+    item: permission,
+    response: {},
+  }),
+
+  // createProtocol() 每条连接调用一次，用来编码/解码上游事件。
+  createProtocol() {
+    return {
+      encodeOutgoing: payload => payload,
+      normalizeIncoming: event => event,
+      sessionUpdate: session => ({ type: 'session.update', session }),
+      audioAppend: audio => ({ type: 'input_audio_buffer.append', audio }),
+      imageAppend: image => ({ type: 'input_image_buffer.append', image }),
+      conversationItemId: () => crypto.randomUUID(),
+      conversationItemCreate: item => ({ type: 'conversation.item.create', item }),
+      responseCreate: response => ({ type: 'response.create', response }),
+      correlateResponseCreate: payload => payload,
+      responseCorrelationId: () => '',
+      responseCancel: () => ({ type: 'response.cancel' }),
+      userTextItem: text => ({
+        type: 'message',
+        role: 'user',
+        content: [{ type: 'input_text', text }],
+      }),
+      functionOutputItem: (callId, output) => ({
+        type: 'function_call_output',
+        call_id: callId,
+        output: JSON.stringify(output),
+      }),
+    }
+  },
+})
+```
+
+上面的 Provider 用于说明装配形状，不是可直接连某家服务的生产实现。`buildMyFrontendInstructions()` 和 `buildMyCoreFrontendTools()` 是占位：核心提示词与内置 Task 工具目前没有单独的公开构造器。生产 Provider 应复制同版本官方 Provider 的 `buildSession()` 逻辑，或直接复用官方 Provider；只把 `agentContext.frontend.tools` 交给上游会丢掉 `spawn_thinking` 等核心工具，Task 创建、权限确认和结果播报都会缺失。若只替换模型、Key 或地址，继续使用官方 Provider。
+
+协议对象必须实现：
+
+```text
+encodeOutgoing / normalizeIncoming / sessionUpdate / audioAppend /
+imageAppend / conversationItemId / conversationItemCreate / responseCreate /
+correlateResponseCreate / responseCorrelationId / responseCancel /
+userTextItem / functionOutputItem
+```
+
+可选的 `connectionMessages`、`validateSessionOptions`、`responseInstructionsItem`、`inputMute`、`inputUnmute`、`sessionClose` 按上游能力实现。Provider 和 Protocol 在注册、建连时都会校验，缺方法或返回结构不合法会立即报错。
+
+无论用哪个 Provider，客户端看到的仍是 Gateway 的 `/api/realtime`，而不是上游地址。上游 API Key、模型地址和音色只属于 Gateway 配置。
 
 ## 七、Gateway：把运行时变成服务
 
@@ -312,11 +899,272 @@ ws://<gateway>/api/realtime
 - 心跳使用 `session.ping` / `session.pong`，正常业务消息也会续租；
 - 断线后可以用 `session.replay` 按 `sequence` 回放有界的服务端推送，但媒体增量、转写增量和即时命令结果不会回放。
 
+#### 客户端配置
+
+用 `GatewayClient` 时，配置集中在构造函数。它接受的是 **Gateway 的连接信息**，不接受上游 Realtime 模型的 API Key：
+
+| 字段 | 必填 | 用途 |
+| --- | --- | --- |
+| `url` | 是 | Gateway WebSocket，例如 `ws://127.0.0.1:3101/api/realtime?sessionId=main` |
+| `createSocket` | 是 | 浏览器传 `url => new WebSocket(url)`；Node/Hardware 可传自己的实现 |
+| `clientType`、`clientVersion`、`clientInstanceId`、`clientLabel` | 建议 | 客户端身份与稳定实例 ID |
+| `accessToken` | 否 | Gateway 访问令牌；不是模型 Key |
+| `takeover` | 否 | 新客户端是否显式接管当前活动连接 |
+| `capabilities` | 建议 | 声明输入、Task、播放回执等能力 |
+| `tools` | 否 | 客户端本地工具定义，自动带上 `client.tools` 能力 |
+| `locale`、`timeZone` | 否 | 语言和时区上下文 |
+| `configure` | 否 | 返回 `voiceEnabled`、`inputEnabled`、`outputEnabled`、`textOnly`、`outputVoice` 等连接配置 |
+| `reconnect`、`requestTimeoutMs`、`connectTimeoutMs`、`handshakeTimeoutMs` | 否 | 重连与超时策略 |
+| `onEvent`、`onStatus`、`onAction`、`onRecovery` | 否 | 事件、连接状态、Client Action 与恢复回调 |
+
+> `accessToken` 是 Gateway 访问凭据，不是 `QWEN_AUDIO_REALTIME_API_KEY`。本机回环访问不需要令牌。浏览器不能给 WebSocket Upgrade 设置 Authorization 头；远程访问时用 `qwen-audio-agent/gateway-websocket-auth` 导出的 `gatewayWebSocketProtocols(accessToken)` 构造子协议，或由反向代理写入 HttpOnly Cookie。
+
+```js
+import { GatewayClient } from 'qwen-audio-agent/gateway-client-sdk'
+import { gatewayWebSocketProtocols } from 'qwen-audio-agent/gateway-websocket-auth'
+
+const accessToken = 'device-token-from-pairing'
+const client = new GatewayClient({
+  url: 'wss://gateway.example/api/realtime',
+  accessToken,
+  createSocket: url => new WebSocket(url, gatewayWebSocketProtocols(accessToken)),
+})
+```
+
+`accessToken` 只用于 Gateway 鉴权，不会进入 GCP 消息，也不会转发给 Realtime Provider。
+
+一个最小但完整的浏览器客户端：
+
+```js
+import { GatewayClient } from 'qwen-audio-agent/gateway-client-sdk'
+import {
+  GatewayClientCapability,
+  GatewayClientProtocolEvent,
+} from 'qwen-audio-agent/gateway-client-protocol'
+import {
+  GatewayClientEvent,
+  GatewayServerEvent,
+} from 'qwen-audio-agent/realtime-events'
+
+let inputSampleRate = null
+
+const client = new GatewayClient({
+  url: 'ws://127.0.0.1:3101/api/realtime?sessionId=main',
+  createSocket: url => new WebSocket(url),
+  clientType: 'web',
+  clientVersion: '2.0.0',
+  clientInstanceId: 'my-client-1',
+  clientLabel: 'My Voice Client',
+  capabilities: [
+    GatewayClientCapability.INPUT_AUDIO,
+    GatewayClientCapability.INPUT_TEXT,
+    GatewayClientCapability.INPUT_FILE,
+    GatewayClientCapability.PLAYBACK_RECEIPTS,
+    GatewayClientCapability.TASK_COMMANDS,
+    GatewayClientCapability.PERMISSION_RESPOND,
+    GatewayClientCapability.INPUT_RESPOND,
+    GatewayClientCapability.CONVERSATION_HISTORY,
+    GatewayClientCapability.CLIENT_EVENTS,
+    GatewayClientCapability.SESSION_REPLAY,
+  ],
+  locale: navigator.language,
+  timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  configure: () => ({
+    voiceEnabled: true,
+    inputEnabled: true,
+    outputEnabled: true,
+    textOnly: false,
+  }),
+  onEvent(event) {
+    if (event.type === GatewayServerEvent.VOICE_READY) {
+      inputSampleRate = event.inputSampleRate
+    }
+    if (event.type === GatewayServerEvent.AUDIO_DELTA) {
+      // event.audio 是 base64 PCM16，event.sampleRate 是播放采样率。
+      playPcm16(event.audio, event.sampleRate, event.responseId)
+    }
+    if (event.type === GatewayServerEvent.TRANSCRIPT_FINAL) {
+      console.log(event.role, event.content)
+    }
+  },
+  onStatus(status) {
+    if (status.state === 'ready') {
+      console.log('negotiated capabilities', status.event.capabilities)
+    }
+  },
+})
+
+client.start()
+```
+
+`configure()` 在 WebSocket 打开时调用，可以返回当前 UI 状态；改变 `voiceEnabled` / `inputEnabled` 等配置需要重连。`GatewayClient` 自动处理 `session.hello`、`session.ready`、请求关联和断线重连；`clientInstanceId` 应当在同一设备的多次启动之间保持稳定。
+
+如果不用 SDK，握手帧必须自己构造。客户端发出的第一条消息形如：
+
+```json
+{
+  "type": "session.hello",
+  "event_id": "evt_client_01",
+  "protocol": { "min": "7.0.0", "max": "7.0.0" },
+  "client": {
+    "type": "web",
+    "instance_id": "my-client-1",
+    "label": "My Voice Client",
+    "version": "2.0.0"
+  },
+  "capabilities": ["input.audio", "input.text", "playback.receipts"],
+  "connection": {
+    "voice_enabled": true,
+    "input_enabled": true,
+    "output_enabled": true,
+    "text_only": false
+  }
+}
+```
+
+Gateway 返回协商后的结果：
+
+```json
+{
+  "type": "session.ready",
+  "event_id": "evt_gateway_01",
+  "request_event_id": "evt_client_01",
+  "protocol_version": "7.0.0",
+  "session_id": "session_01",
+  "capabilities": ["input.audio", "input.text"],
+  "connection": {
+    "lease_generation": 7,
+    "replaced": false
+  }
+}
+```
+
+只有 `session.ready` 里的 `capabilities` 才是当前连接真正可用的能力。不要根据客户端版本或产品名称猜能力。
+
 ### 7.2 音频走快速路径，语义输入才进路由
 
 原始音频帧不进入语义路由器。客户端通过 `input_audio_buffer.append` 发送 base64 PCM16 单声道音频，采样率取 `voice.ready` 返回的 `inputSampleRate`；输出音频通过 `audio.delta` 携带 base64 和 `sampleRate` 播放。
 
 只有已经提交的语义输入（文本、图片、文件、混合 Part）才进入 `GatewayEventRouter`。这也是低延迟的关键：音频流和模型增量不应该被任务队列、权限检查或事件投影拖慢。
+
+#### 客户端 → Gateway：文本、音频与文件
+
+音频走原始媒体路径。客户端发送的是 **base64 编码的 PCM16 单声道、little-endian** 采样；采样率不是写死的，而是取 `voice.ready` 里的 `inputSampleRate`。Qwen Audio 常见值是 16 kHz 输入、24 kHz 输出，但客户端应按实际公告值工作。
+
+```js
+function bytesToBase64(bytes) {
+  let binary = ''
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+  }
+  return btoa(binary)
+}
+
+// samples: Float32Array，单声道，已经按 inputSampleRate 重采样
+function pcm16Base64(samples) {
+  const buffer = new ArrayBuffer(samples.length * 2)
+  const view = new DataView(buffer)
+  for (let index = 0; index < samples.length; index += 1) {
+    const sample = Math.max(-1, Math.min(1, samples[index]))
+    const pcm = sample < 0 ? sample * 32768 : sample * 32767
+    view.setInt16(index * 2, Math.round(pcm), true)
+  }
+  return bytesToBase64(new Uint8Array(buffer))
+}
+
+function sendAudioChunk(samples) {
+  if (!inputSampleRate) throw new Error('voice.ready has not arrived')
+  client.send({
+    type: GatewayClientProtocolEvent.INPUT_AUDIO_APPEND,
+    audio: pcm16Base64(samples),
+  })
+}
+```
+
+文本、图片和文件走同一条语义输入命令：
+
+```js
+client.send({
+  type: GatewayClientProtocolEvent.CONVERSATION_ITEM_CREATE,
+  parts: [
+    { type: 'text', text: '帮我看看这张图里是什么' },
+    {
+      type: 'file',
+      mime: 'image/jpeg',
+      filename: 'photo.jpg',
+      url: 'data:image/jpeg;base64,...',
+    },
+  ],
+})
+```
+
+输入 Part 的规则：
+
+- 最多 16 个 parts；
+- `file.url` 只接受 `data:`、`http:`、`https:`；
+- `data:` 必须是 base64，且 MIME 要与 `mime` 字段一致；
+- 单个文件最大 8 MB，单轮附件合计最大 12 MB；
+- 图片文件是“附件”，不是持续视觉流。实时视觉帧要用 `input_image_buffer.append`：JPEG、base64、不超过 256 KiB，最多每秒 1 帧。
+
+打断当前回复：
+
+```js
+client.send({ type: GatewayClientProtocolEvent.RESPONSE_CANCEL })
+```
+
+音频帧、文本轮次和 Task 命令共用同一条 WebSocket。区别在于：音频和已经提交的用户输入会走实时前台；`task.create` 是运行时控制命令，不伪装成用户对话。
+
+#### Gateway → 客户端：音频流与转写
+
+服务端推送给客户端的事件主要有：
+
+| 事件 | 关键字段 | 客户端要做什么 |
+| --- | --- | --- |
+| `voice.ready` | `inputSampleRate`、`provider` | 记录输入采样率，之后才能开始采集 |
+| `audio.delta` | `audio`、`sampleRate`、`responseId` | base64 解码为 PCM16，按 `sampleRate` 播放 |
+| `audio.done` | `responseId` | 当前回复的音频生成结束，不代表已经播完 |
+| `response.started` / `response.interrupted` | `responseId` | 更新回复生命周期 |
+| `transcript.delta` / `transcript.final` | `role`、`content` | 显示或记录用户/助手文本 |
+| `task.*` | `task` 及其快照字段 | 渲染任务卡、权限卡、进度 |
+| `agent.activity` | `activity` | 展示前台正在做什么，不当作语音播报 |
+| `error` | `message`、`code` | 处理协议或运行时错误 |
+
+输出音频同样是 base64 PCM16，播放采样率取每个 `audio.delta` 的 `sampleRate`：
+
+```js
+onEvent(event) {
+  if (event.type === GatewayServerEvent.AUDIO_DELTA) {
+    playbackQueue.push({
+      responseId: event.responseId,
+      sampleRate: event.sampleRate,
+      pcm16: decodeBase64(event.audio),
+    })
+  }
+  if (event.type === GatewayServerEvent.TRANSCRIPT_DELTA) {
+    appendCaption(event.role, event.content)
+  }
+}
+```
+
+播放回执不是可选的装饰。协商了 `playback.receipts` 后，客户端应按真实播放进度发送：
+
+```js
+import { GatewayClientEvent } from 'qwen-audio-agent/realtime-events'
+
+// 第一帧真正开始播放时
+client.send({
+  type: GatewayClientEvent.PLAYBACK_STARTED,
+  responseId,
+})
+
+// 队列真正播放完，或被用户/系统取消时
+client.send({
+  type: GatewayClientEvent.PLAYBACK_ENDED,
+  responseId,
+})
+```
+
+服务端用这两个回执判断结果是否已经送达，以及下一段自动播报什么时候可以插入。把 `audio.done` 直接当成“用户已经听完”，会破坏后台结果投递的时序。
 
 ### 7.3 控制面：Task、权限、补充输入和回放
 
@@ -335,6 +1183,87 @@ ws://<gateway>/api/realtime
 | `session.replay` | 从 sequence 游标回放服务端推送 |
 
 `task.create` 是显式集成命令，不是常规语音聊天路径。正常的语音请求仍然由前台 Agent 通过 `spawn_thinking` 创建 Task，以保留它的路由判断和自然承接行为。
+
+显式创建 Task 的客户端代码：
+
+```js
+import { GatewayClientProtocolEvent } from 'qwen-audio-agent/gateway-client-protocol'
+
+const result = await client.request(GatewayClientProtocolEvent.TASK_CREATE, {
+  message: {
+    parts: [
+      { type: 'text', text: '检查项目并生成 README，保留现有构建命令' },
+    ],
+  },
+})
+
+const taskId = result.task.id
+```
+
+返回的 `task.create.result` 只表示 Task 已被受理，不表示工作已经完成。后续状态通过服务端推送到达：
+
+```text
+task.accepted
+task.running
+task.progress
+task.completed / task.failed / task.cancelled
+task.permission.requested / task.permission.resolved
+task.input.requested / task.input.resolved
+```
+
+查询和取消：
+
+```js
+const { tasks } = await client.request(
+  GatewayClientProtocolEvent.TASK_LIST,
+  { limit: 20 },
+)
+
+await client.request(GatewayClientProtocolEvent.TASK_CANCEL, {
+  task_id: taskId,
+})
+```
+
+调整一个仍在执行的 Task：
+
+```js
+await client.request(GatewayClientProtocolEvent.TASK_UPDATE, {
+  task_id: taskId,
+  message: {
+    parts: [{ type: 'text', text: '把测试命令也补进去' }],
+  },
+})
+```
+
+权限和补充输入是两类不同的人机交互：
+
+```js
+import {
+  GatewayClientProtocolEvent,
+} from 'qwen-audio-agent/gateway-client-protocol'
+import { GatewayTaskEvent } from 'qwen-audio-agent/realtime-events'
+
+if (event.type === GatewayTaskEvent.PERMISSION_REQUESTED) {
+  await client.request(GatewayClientProtocolEvent.PERMISSION_RESPOND, {
+    permission_id: event.permission.id,
+    // task：允许当前 Task 及其后续操作
+    // always：本会话内的后续权限请求自动允许
+    // reject：拒绝
+    decision: 'task',
+  })
+}
+
+if (event.type === GatewayTaskEvent.INPUT_REQUESTED) {
+  await client.request(GatewayClientProtocolEvent.INPUT_RESPOND, {
+    task_id: event.task.id,
+    input_request_id: event.input.id,
+    action: 'accept', // accept | decline | cancel
+    text: '使用现有的测试目录，不要新建。',
+  })
+}
+```
+
+`permission.respond` 处理“是否允许后台执行某个操作”；`task.input.respond` 处理“后台需要用户补充信息”。不要把补充输入当成权限批准，也不要在没有真实 `permission_id` 时构造同意。
 
 ### 7.4 Client Event 与 Client Action：一个描述发生了什么，一个要求做什么
 
@@ -601,10 +1530,14 @@ my-profile/
 如果你要做自己的 App、硬件或网页，不需要复刻 WebUI。用共享的 `GatewayClient`：
 
 ```js
+import { GatewayClient } from 'qwen-audio-agent/gateway-client-sdk'
 import {
-  GatewayClient,
   GatewayClientCapability,
-} from 'qwen-audio-agent/gateway-client-sdk'
+  GatewayClientProtocolEvent,
+} from 'qwen-audio-agent/gateway-client-protocol'
+import { GatewayServerEvent } from 'qwen-audio-agent/realtime-events'
+
+let greeted = false
 
 const client = new GatewayClient({
   url: 'ws://127.0.0.1:3101/api/realtime',
@@ -618,10 +1551,10 @@ const client = new GatewayClient({
     GatewayClientCapability.TASK_COMMANDS,
   ],
   onEvent(event) {
-    if (event.type === 'audio.delta') {
+    if (event.type === GatewayServerEvent.AUDIO_DELTA) {
       // event.audio, event.sampleRate, event.responseId
     }
-    if (event.type === 'transcript.final') {
+    if (event.type === GatewayServerEvent.TRANSCRIPT_FINAL) {
       // 展示用户/助手最终转写
     }
   },
@@ -629,10 +1562,18 @@ const client = new GatewayClient({
     // Gateway 请求客户端执行环境动作
     return { status: 'completed', output: {} }
   },
+  onStatus(status) {
+    if (status.state !== 'ready' || greeted) return
+    greeted = true
+    client.send({
+      type: GatewayClientProtocolEvent.CONVERSATION_ITEM_CREATE,
+      parts: [{ type: 'text', text: '你好' }],
+    })
+  },
 })
 
+// 握手完成前 send() 会返回 false，所以首条消息放在 ready 之后。
 client.start()
-client.send({ type: 'conversation.item.create', text: '你好' })
 ```
 
 SDK 会处理 `session.hello` / `session.ready`、命令关联、Client Action、断线重连和状态恢复。你仍然需要自己负责：
