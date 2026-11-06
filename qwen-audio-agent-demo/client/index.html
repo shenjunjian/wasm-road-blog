@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Qwen Audio Agent Demo</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header>
+        <h1>Qwen Audio Agent Demo</h1>
+        <p class="hint">
+          浏览器通过 Vite 代理连接 Gateway；API Key 只存在于 Gateway 服务端。
+        </p>
+      </header>
+
+      <section class="status-bar">
+        <span>连接状态：</span>
+        <strong id="status">正在连接…</strong>
+      </section>
+
+      <section class="controls">
+        <button id="mic" type="button" disabled>开始麦克风</button>
+        <button id="task" type="button" disabled>创建测试任务</button>
+      </section>
+
+      <section class="composer">
+        <input
+          id="text"
+          type="text"
+          autocomplete="off"
+          placeholder="也可以输入文本，例如：你好，介绍一下你自己"
+        />
+        <button id="send" type="button" disabled>发送文本</button>
+      </section>
+
+      <section>
+        <h2>对话转写</h2>
+        <div id="transcript" class="transcript"></div>
+      </section>
+
+      <section>
+        <h2>事件日志</h2>
+        <pre id="log" class="log"></pre>
+      </section>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

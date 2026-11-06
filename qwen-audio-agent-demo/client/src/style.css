@@ -1,0 +1,140 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, "Segoe UI", system-ui, sans-serif;
+  background: #0b1020;
+  color: #e8ecf8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(76, 110, 245, 0.25), transparent 35%),
+    radial-gradient(circle at bottom right, rgba(0, 200, 180, 0.18), transparent 35%),
+    #0b1020;
+}
+
+.app {
+  width: min(980px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 32px 0 56px;
+}
+
+header h1 {
+  margin: 0 0 8px;
+  font-size: clamp(28px, 5vw, 46px);
+  letter-spacing: -0.04em;
+}
+
+.hint {
+  color: #9ba6bf;
+  line-height: 1.6;
+}
+
+.status-bar,
+.controls,
+.composer {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.status-bar {
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.status-bar strong {
+  color: #7ef0c1;
+}
+
+.controls,
+.composer {
+  margin-top: 16px;
+}
+
+button,
+input {
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  font: inherit;
+}
+
+button {
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+input {
+  flex: 1;
+  min-width: 240px;
+  padding: 11px 14px;
+  outline: none;
+}
+
+input:focus {
+  border-color: #6f8cff;
+  box-shadow: 0 0 0 3px rgba(111, 140, 255, 0.18);
+}
+
+h2 {
+  margin-top: 32px;
+  font-size: 16px;
+  color: #b8c2da;
+}
+
+.transcript,
+.log {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  background: rgba(4, 8, 18, 0.55);
+}
+
+.transcript {
+  min-height: 180px;
+  padding: 14px 16px;
+}
+
+.transcript p {
+  margin: 0 0 10px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.transcript .user {
+  color: #9fc0ff;
+}
+
+.transcript .assistant {
+  color: #8ff0ce;
+}
+
+.log {
+  max-height: 320px;
+  overflow: auto;
+  padding: 14px 16px;
+  color: #9ba6bf;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}

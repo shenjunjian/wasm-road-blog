@@ -1,0 +1,23 @@
+{
+  "name": "qwen-audio-agent-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n gateway,client -c cyan,green \"npm run dev:gateway\" \"npm run dev:client\"",
+    "dev:gateway": "node server.mjs",
+    "dev:client": "vite",
+    "build": "vite build",
+    "start": "npm run dev"
+  },
+  "dependencies": {
+    "qwen-audio-agent": "2.0.1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0",
+    "vite": "^7.3.7"
+  },
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+  }
+}
