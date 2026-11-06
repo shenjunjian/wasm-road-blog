@@ -61,7 +61,7 @@ npm run dev
 
 ## 环境变量与前端配置
 
-`server.mjs` 在导入 `qwen-audio-agent` 之前完成环境准备，因为该包会在模块加载时读取配置。
+`server.mjs` 通过最前面的 `bootstrap-env.mjs` 完成环境准备，因为 `qwen-audio-agent` 会在模块加载时读取配置。
 
 ```dotenv
 # 用户要求的入口；server.mjs 会把它映射为 DashScope 使用的变量
@@ -237,6 +237,7 @@ return {
 | 文件 | 作用 |
 | --- | --- |
 | `server.mjs` | 读取环境变量、创建后台 Agent、启动 Gateway |
+| `bootstrap-env.mjs` | 在 qwen-audio-agent 加载前读取 .env 并准备环境变量 |
 | `backend-stub.mjs` | 实现 `BackendPort` 的假后台 |
 | `ASSISTANT.md` | 前台 Agent 的人设/行为约束 |
 | `client/src/main.js` | `GatewayClient`、文本输入、麦克风 PCM、音频播放、任务按钮 |
