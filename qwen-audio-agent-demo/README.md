@@ -54,7 +54,7 @@ npm run dev
 - Gateway：`http://127.0.0.1:3101`
 - 浏览器客户端：`http://127.0.0.1:5173`
 
-打开 `http://127.0.0.1:5173`，允许麦克风权限即可开始说话；也可以直接输入文本，或点击“创建测试任务”。
+打开 `http://127.0.0.1:5173`，先点击“连接”，再允许麦克风权限即可开始说话；也可以直接输入文本，或点击“创建测试任务”。页面刚打开时不会自动连接，点击“断开连接”会停止麦克风和播放。
 
 > 麦克风只在 `localhost` / `127.0.0.1` 或 HTTPS 页面可用。
 > 同一个 Gateway 的同一个 owner 只允许一个活动客户端；同时开两个页面可能看到 `client_occupied`。
@@ -107,7 +107,7 @@ const client = new GatewayClient({
   onStatus: handleStatus,
   onAction: () => ({ status: 'unsupported', error: { code: 'demo_unsupported', message: 'demo' } }),
 })
-client.start()
+// 页面加载后保持未连接，用户点击“连接”时再调用 client.start()
 ```
 
 这里没有 API Key 参数。浏览器只配置 Gateway 地址和自身能力；如果 Gateway 与页面不同源，需要通过 Gateway 的允许来源/远程访问配置开放，而不是把 Key 放进前端。

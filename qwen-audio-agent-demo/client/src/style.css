@@ -55,6 +55,10 @@ header h1 {
   color: #7ef0c1;
 }
 
+.status-bar button {
+  margin-left: auto;
+}
+
 .controls,
 .composer {
   margin-top: 16px;
